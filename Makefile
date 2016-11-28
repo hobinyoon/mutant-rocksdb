@@ -472,9 +472,41 @@ $(SHARED3): $(SHARED4)
 	ln -fs $(SHARED4) $(SHARED3)
 endif
 
-$(SHARED4):
-	$(CXX) $(PLATFORM_SHARED_LDFLAGS)$(SHARED3) $(CXXFLAGS) $(PLATFORM_SHARED_CFLAGS) $(LIB_SOURCES) $(TOOL_LIB_SOURCES) \
-		$(LDFLAGS) -o $@
+# $(info $$PLATFORM_SHARED_CFLAGS: ${PLATFORM_SHARED_CFLAGS})
+# $(info $$PLATFORM_SHARED_LDFLAGS: ${PLATFORM_SHARED_LDFLAGS})
+# $(info $$SHARED3: ${SHARED3})
+# $(info $$CXXFLAGS: ${CXXFLAGS})
+# $(info $$LDFLAGS: ${LDFLAGS})
+#
+# $PLATFORM_SHARED_CFLAGS: -fPIC
+# $PLATFORM_SHARED_LDFLAGS: -Wl,--no-as-needed -shared -Wl,-soname -Wl,
+# $SHARED3: librocksdb.so.4.11
+# $CXXFLAGS:  -g -W -Wextra -Wall -Wsign-compare -Wshadow -Wno-unused-parameter
+#  -I. -I./include -std=c++11  -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX
+#  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY
+#  -DGFLAGS=google -DZLIB -DBZIP2 -DROCKSDB_MALLOC_USABLE_SIZE
+#  -DROCKSDB_PTHREAD_ADAPTIVE_MUTEX -DROCKSDB_BACKTRACE -march=native   -isystem
+#  ./third-party/gtest-1.7.0/fused-src -O2 -fno-omit-frame-pointer
+#  -momit-leaf-frame-pointer -DNDEBUG -Woverloaded-virtual -Wnon-virtual-dtor
+#  -Wno-missing-field-initializers
+# $LDFLAGS:  -lpthread -lrt -lsnappy -lgflags -lz -lbz2
+
+shared_lib_src = $(LIB_SOURCES) $(TOOL_LIB_SOURCES)
+shared_lib_objs = $(shared_lib_src:.cc=.o)
+#
+#$(info $$shared_lib_src is [${shared_lib_src}])
+#$(info $$shared_lib_objs is [${shared_lib_objs}])
+
+$(shared_lib_src:.cc=.o):%.o:%.cc
+	$(CXX) $(PLATFORM_SHARED_LDFLAGS)$(SHARED3) $(CXXFLAGS) $(PLATFORM_SHARED_CFLAGS) -c $< $(LDFLAGS) -o $@
+
+$(SHARED4): $(shared_lib_objs)
+	$(CXX) $(PLATFORM_SHARED_LDFLAGS)$(SHARED3) $(CXXFLAGS) $(PLATFORM_SHARED_CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Serial build
+# $(SHARED4):
+# 	$(CXX) $(PLATFORM_SHARED_LDFLAGS)$(SHARED3) $(CXXFLAGS) $(PLATFORM_SHARED_CFLAGS) $(LIB_SOURCES) $(TOOL_LIB_SOURCES) \
+# 		$(LDFLAGS) -o $@
 
 endif  # PLATFORM_SHARED_EXT
 
