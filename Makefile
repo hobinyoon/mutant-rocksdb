@@ -75,6 +75,10 @@ ifeq ($(MAKECMDGOALS),rocksdbjavastatic)
 	DEBUG_LEVEL=0
 endif
 
+ifeq ($(MAKECMDGOALS),rocksdbjava)
+	DEBUG_LEVEL=0
+endif
+
 ifeq ($(MAKECMDGOALS),rocksdbjavastaticrelease)
 	DEBUG_LEVEL=0
 endif
@@ -1403,10 +1407,28 @@ CLEAN_FILES += jl
 $(java_libobjects): jl/%.o: %.cc
 	$(AM_V_CC)mkdir -p $(@D) && $(CXX) $(CXXFLAGS) -fPIC -c $< -o $@ $(COVERAGEFLAGS)
 
-rocksdbjava: $(java_libobjects)
+
+# Split rocksdbjava into 2 for parallel build
+.PHONY: rocksdbjava1 rocksdbjava2
+rocksdbjava: rocksdbjava1 rocksdbjava2
+
+rocksdbjava1: $(java_libobjects)
 	$(AM_V_GEN)cd java;$(MAKE) javalib;
 	$(AM_V_at)rm -f ./java/target/$(ROCKSDBJNILIB)
-	$(AM_V_at)$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -o ./java/target/$(ROCKSDBJNILIB) $(JNI_NATIVE_SOURCES) $(java_libobjects) $(JAVA_LDFLAGS) $(COVERAGEFLAGS)
+
+jni_native_objs = $(JNI_NATIVE_SOURCES:.cc=.o)
+$(JNI_NATIVE_SOURCES:.cc=.o):%.o:%.cc rocksdbjava1
+	$(AM_V_at)$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -c $< $(JAVA_LDFLAGS) $(COVERAGEFLAGS) -o $@
+
+rocksdbjava2: rocksdbjava1 $(jni_native_objs)
+#	$(info $$JNI_NATIVE_SOURCES iss [${JNI_NATIVE_SOURCES}])
+#	$(info $$java_libobjects is [${java_libobjects}])
+#	$(AM_V_at)$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -o ./java/target/$(ROCKSDBJNILIB) $(JNI_NATIVE_SOURCES) $(java_libobjects) $(JAVA_LDFLAGS) $(COVERAGEFLAGS)
+	$(AM_V_at)$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC \
+		-o ./java/target/$(ROCKSDBJNILIB) \
+		$(jni_native_objs) \
+		$(java_libobjects) \
+		$(JAVA_LDFLAGS) $(COVERAGEFLAGS)
 	$(AM_V_at)cd java;jar -cf target/$(ROCKSDB_JAR) HISTORY*.md
 	$(AM_V_at)cd java/target;jar -uf $(ROCKSDB_JAR) $(ROCKSDBJNILIB)
 	$(AM_V_at)cd java/target/classes;jar -uf ../$(ROCKSDB_JAR) org/rocksdb/*.class org/rocksdb/util/*.class
