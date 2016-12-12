@@ -1,5 +1,6 @@
 #include <csignal>
 #include <cstdio>
+#include <memory>
 #include <string>
 
 #include <boost/format.hpp>
@@ -26,6 +27,37 @@ void on_signal(int sig) {
 string _db_path;
 DB* _db;
 
+
+// Optimize later
+string GenRandomAsciiString(const int len) {
+	vector<char> s(len);
+	static const char alphanum[] =
+		"0123456789"
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		"abcdefghijklmnopqrstuvwxyz";
+
+	for (int i = 0; i < len; ++i) {
+		s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+	}
+
+	return string(s.begin(), s.end());
+}
+
+
+void Insert(const int num_keys) {
+	Cons::MT _(boost::format("Inserting %d key-value pairs ...") % num_keys);
+	for (int i = 0; i < num_keys; i ++) {
+		string k = str(boost::format("%010d") % i);
+		string v = GenRandomAsciiString(990);
+
+		static const auto wo = WriteOptions();
+		Status s = _db->Put(wo, k, v);
+		if (! s.ok())
+			THROW("Put failed");
+	}
+}
+
+
 int main(int argc, char* argv[]) {
 	try {
 		signal(SIGSEGV, on_signal);
@@ -47,18 +79,15 @@ int main(int argc, char* argv[]) {
 		if (! s.ok())
 			THROW("DB::Open failed");
 
-		// Put key-value
-		s = _db->Put(WriteOptions(), "key1", "value");
-		if (! s.ok())
-			THROW("Put failed");
+		Insert(10000);
 
 		// Get value
-		string value;
-		s = _db->Get(ReadOptions(), "key1", &value);
-		if (! s.ok())
-			THROW("Get failed");
-		if (value != "value")
-			THROW("Unexpected");
+		//string value;
+		//s = _db->Get(ReadOptions(), "key1", &value);
+		//if (! s.ok())
+		//	THROW("Get failed");
+		//if (value != "value")
+		//	THROW("Unexpected");
 
 		delete _db;
 	} catch (const exception& e) {
