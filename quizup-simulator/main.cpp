@@ -58,6 +58,16 @@ void Insert(const int num_keys) {
 }
 
 
+string Get(const string& k) {
+	string v;
+	static const auto ro = ReadOptions();
+	Status s = _db->Get(ro, k, &v);
+	if (! s.ok())
+		THROW("Get failed");
+	return v;
+}
+
+
 int main(int argc, char* argv[]) {
 	try {
 		signal(SIGSEGV, on_signal);
@@ -79,15 +89,8 @@ int main(int argc, char* argv[]) {
 		if (! s.ok())
 			THROW("DB::Open failed");
 
-		Insert(10000);
-
-		// Get value
-		//string value;
-		//s = _db->Get(ReadOptions(), "key1", &value);
-		//if (! s.ok())
-		//	THROW("Get failed");
-		//if (value != "value")
-		//	THROW("Unexpected");
+		//Insert(10000);
+		Cons::P(Get("0000000000"));
 
 		delete _db;
 	} catch (const exception& e) {
