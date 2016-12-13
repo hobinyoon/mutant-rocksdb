@@ -44,9 +44,10 @@ string GenRandomAsciiString(const int len) {
 }
 
 
-void Insert(const int num_keys) {
-	Cons::MT _(boost::format("Inserting %d key-value pairs ...") % num_keys);
-	for (int i = 0; i < num_keys; i ++) {
+void Insert(int lower, int upper) {
+	Cons::MT _(boost::format("Inserting key-value pairs in range [%d, %d) ...")
+      % lower % upper);
+	for (int i = lower; i < upper; i += 2) {
 		string k = str(boost::format("%010d") % i);
 		string v = GenRandomAsciiString(990);
 
@@ -58,13 +59,17 @@ void Insert(const int num_keys) {
 }
 
 
-string Get(const string& k) {
+void Get(const string& k) {
 	string v;
 	static const auto ro = ReadOptions();
 	Status s = _db->Get(ro, k, &v);
+  if (s.IsNotFound()) {
+    Cons::P(boost::format("Key %s not found") % k);
+    return;
+  }
 	if (! s.ok())
 		THROW("Get failed");
-	return v;
+  Cons::P(boost::format("Value=%s") % v);
 }
 
 
@@ -89,8 +94,10 @@ int main(int argc, char* argv[]) {
 		if (! s.ok())
 			THROW("DB::Open failed");
 
-		//Insert(10000);
-		Cons::P(Get("0000000000"));
+		//Insert(    0, 20000);
+		Get("0000010002");
+
+    sleep(2);
 
 		delete _db;
 	} catch (const exception& e) {
