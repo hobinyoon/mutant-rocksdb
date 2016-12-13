@@ -51,6 +51,7 @@
 #include "util/perf_context_imp.h"
 #include "util/stop_watch.h"
 #include "util/sync_point.h"
+#include "util/util.h"
 
 namespace rocksdb {
 
@@ -132,6 +133,9 @@ class FilePicker {
         is_hit_file_last_in_level_ =
             curr_index_in_curr_level_ == curr_file_level_->num_files - 1;
         int cmp_largest = -1;
+
+        //TRACE << boost::format("curr_level_=%d num_levels_=%d curr_file_level_->num_files=%d\n")
+        //  % curr_level_ % num_levels_ % curr_file_level_->num_files;
 
         // Do key range filtering of files or/and fractional cascading if:
         // (1) not all the files are in level 0, or
@@ -910,6 +914,12 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
                   bool* key_exists, SequenceNumber* seq) {
   Slice ikey = k.internal_key();
   Slice user_key = k.user_key();
+  if (false)
+    TRACE << boost::format("user_key=%s status=%s IsMergeInProgress()=%s\n")
+      % user_key.ToString()
+      % status->ToString()
+      % status->IsMergeInProgress()
+      ;
 
   assert(status->ok() || status->IsMergeInProgress());
 
@@ -936,6 +946,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
       user_comparator(), internal_comparator());
   FdWithKeyRange* f = fp.GetNextFile();
   while (f != nullptr) {
+    //TRACE << boost::format("FdWithKeyRange: %s\n") % *f;
     *status = table_cache_->Get(
         read_options, *internal_comparator(), f->fd, ikey, &get_context,
         cfd_->internal_stats()->GetFileReadHist(fp.GetHitFileLevel()),
@@ -947,9 +958,11 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
       return;
     }
 
+    // Mutant: the value is already set before this
     switch (get_context.State()) {
       case GetContext::kNotFound:
         // Keep searching in other files
+        //TRACE << "Key not found\n";
         break;
       case GetContext::kFound:
         if (fp.GetHitFileLevel() == 0) {
@@ -985,6 +998,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
                                           merge_context->GetOperands(), value,
                                           info_log_, db_statistics_, env_);
   } else {
+    //TRACE << "\n";
     if (key_exists != nullptr) {
       *key_exists = false;
     }

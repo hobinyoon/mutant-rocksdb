@@ -24,6 +24,7 @@
 #include "util/perf_context_imp.h"
 #include "util/stop_watch.h"
 #include "util/sync_point.h"
+#include "util/util.h"
 
 namespace rocksdb {
 
@@ -297,7 +298,9 @@ Status TableCache::Get(const ReadOptions& options,
   }
   if (s.ok()) {
     get_context->SetReplayLog(row_cache_entry);  // nullptr if no cache.
-    s = t->Get(options, k, get_context, skip_filters);
+    // *t is of type BlockBasedTable
+    //TRACE << boost::format("*t is of type %s\n") % typeid(*t).name();
+    s = t->Get(options, k, get_context, &fd, skip_filters);
     get_context->SetReplayLog(nullptr);
     if (handle != nullptr) {
       ReleaseHandle(handle);

@@ -17,6 +17,7 @@
 #include "db/merge_context.h"
 #include "db/merge_helper.h"
 #include "db/pinned_iterators_manager.h"
+#include "mutant/tablet_acc_mon.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/env.h"
 #include "rocksdb/iterator.h"
@@ -594,6 +595,10 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s,
 
     *seq = saver.seq;
   }
+
+  // Mutant: MemTable accessed. For a memtable ID, we use the address for
+  // now.  I don't see a ID.
+  TabletAccMon::MemtRead(this);
 
   // No change to value, since we have not yet found a Put/Delete
   if (!found_final_value && merge_in_progress) {

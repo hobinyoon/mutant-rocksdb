@@ -193,6 +193,7 @@ Status BuildTable(
   }
 
   // Output to event logger and fire events.
+  // Mutant: SstCreated. May want to log keyrange and level.
   EventHelpers::LogAndNotifyTableFileCreationFinished(
       event_logger, ioptions.listeners, dbname, column_family_name, fname,
       job_id, meta->fd, tp, reason, s);

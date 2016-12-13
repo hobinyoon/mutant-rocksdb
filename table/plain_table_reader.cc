@@ -38,6 +38,7 @@
 #include "util/perf_context_imp.h"
 #include "util/stop_watch.h"
 #include "util/string_util.h"
+#include "util/util.h"
 
 
 namespace rocksdb {
@@ -488,6 +489,8 @@ Status PlainTableReader::GetOffset(PlainTableKeyDecoder* decoder,
 }
 
 bool PlainTableReader::MatchBloom(uint32_t hash) const {
+  // Mutant: TODO: This path is not taken. Hmm.
+  TRACE << "\n";
   if (!enable_bloom_) {
     return true;
   }
@@ -533,6 +536,11 @@ void PlainTableReader::Prepare(const Slice& target) {
 
 Status PlainTableReader::Get(const ReadOptions& ro, const Slice& target,
                              GetContext* get_context, bool skip_filters) {
+  return Get(ro, target, get_context, NULL, skip_filters);
+}
+
+Status PlainTableReader::Get(const ReadOptions& ro, const Slice& target,
+                             GetContext* get_context, const FileDescriptor* fd, bool skip_filters) {
   // Check bloom filter first.
   Slice prefix_slice;
   uint32_t prefix_hash;

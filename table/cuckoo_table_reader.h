@@ -43,6 +43,8 @@ class CuckooTableReader: public TableReader {
 
   Status Get(const ReadOptions& read_options, const Slice& key,
              GetContext* get_context, bool skip_filters = false) override;
+  Status Get(const ReadOptions& read_options, const Slice& key,
+             GetContext* get_context, const FileDescriptor* fd, bool skip_filters = false) override;
 
   InternalIterator* NewIterator(const ReadOptions&, Arena* arena = nullptr,
                                 bool skip_filters = false) override;

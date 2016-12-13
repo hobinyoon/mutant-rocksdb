@@ -14,6 +14,8 @@
 #include "db/dbformat.h"
 #include "db/pinned_iterators_manager.h"
 
+#include "mutant/tablet_acc_mon.h"
+
 #include "rocksdb/cache.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/env.h"
@@ -43,6 +45,7 @@
 #include "util/stop_watch.h"
 #include "util/string_util.h"
 #include "util/sync_point.h"
+#include "util/util.h"
 
 namespace rocksdb {
 
@@ -1379,7 +1382,16 @@ bool BlockBasedTable::FullFilterKeyMayMatch(const ReadOptions& read_options,
 }
 
 Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
-                            GetContext* get_context, bool skip_filters) {
+                            GetContext* get_context,
+                            bool skip_filters) {
+  return Get(read_options, key, get_context, NULL, skip_filters);
+}
+
+Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
+                            GetContext* get_context,
+                            const FileDescriptor* fd,
+                            bool skip_filters) {
+  //TRACE << boost::format("skip_filters=%d\n") % skip_filters;
   Status s;
   CachableEntry<FilterBlockReader> filter_entry;
   if (!skip_filters) {
@@ -1391,6 +1403,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
   // If full filter not useful, Then go into each block
   if (!FullFilterKeyMayMatch(read_options, filter, key)) {
     RecordTick(rep_->ioptions.statistics, BLOOM_FILTER_USEFUL);
+    TRACE << "Filtered out by full filter\n";
   } else {
     BlockIter iiter;
     NewIndexIterator(read_options, &iiter);
@@ -1414,8 +1427,20 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
         // TODO: think about interaction with Merge. If a user key cannot
         // cross one data block, we should be fine.
         RecordTick(rep_->ioptions.statistics, BLOOM_FILTER_USEFUL);
+        TRACE << "Filtered out by block filter\n";
         break;
       } else {
+        // Mutant: Disk access happens here.  It's a file-system level access.
+        // It doesn't necessarily translate to disk IO though: you have a block
+        // layer and page cache below.
+        //
+        // TODO: How many blocks does a SSTable have?
+        //
+        // Mutant: TODO: Update access statistics
+        if (fd) {
+          TabletAccMon::SstRead(fd->GetNumber());
+        }
+
         BlockIter stack_biter;
         if (pin_blocks) {
           // We need to create the BlockIter on heap because we may need to
@@ -1426,6 +1451,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
           biter = &stack_biter;
           NewDataBlockIterator(rep_, read_options, iiter.value(), biter);
         }
+        //TRACE << "\n";
 
         if (read_options.read_tier == kBlockCacheTier &&
             biter->status().IsIncomplete()) {
@@ -1433,12 +1459,14 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
           // Update Saver.state to Found because we are only looking for whether
           // we can guarantee the key is not there when "no_io" is set
           get_context->MarkKeyMayExist();
+          //TRACE << "\n";
           break;
         }
         if (!biter->status().ok()) {
           s = biter->status();
           break;
         }
+        //TRACE << "\n";
 
         // Call the *saver function on each entry/block until it returns false
         for (biter->Seek(key); biter->Valid(); biter->Next()) {
@@ -1447,12 +1475,20 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
             s = Status::Corruption(Slice());
           }
 
+          // Mutant:
+          //   key @ sequence: type
+          //   parsed_key=['0000010002' @ 25002: 1]
+          //TRACE << boost::format("Mutant: parsed_key=[%s]\n")
+          //  % parsed_key.DebugString();
+          //
+          // This function saves the value in the member functino of get_context
           if (!get_context->SaveValue(parsed_key, biter->value(), pin_blocks)) {
             done = true;
             break;
           }
         }
         s = biter->status();
+        //TRACE << "\n";
 
         if (pin_blocks) {
           if (get_context->State() == GetContext::kMerge) {
@@ -1474,6 +1510,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
       s = iiter.status();
     }
   }
+  //TRACE << "\n";
 
   // if rep_->filter_entry is not set, we should call Release(); otherwise
   // don't call, in this case we have a local copy in rep_->filter_entry,
@@ -1481,6 +1518,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
   if (!rep_->filter_entry.IsSet()) {
     filter_entry.Release(rep_->table_options.block_cache.get());
   }
+  //TRACE << "\n";
   return s;
 }
 

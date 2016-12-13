@@ -55,6 +55,7 @@ LIB_SOURCES =                                                   \
   memtable/hash_skiplist_rep.cc                                 \
   memtable/skiplistrep.cc                                       \
   memtable/vectorrep.cc                                         \
+  mutant/tablet_acc_mon.cc                                      \
   port/stack_trace.cc                                           \
   port/port_posix.cc                                            \
   table/adaptive_table_factory.cc                               \

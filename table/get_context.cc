@@ -11,6 +11,7 @@
 #include "rocksdb/statistics.h"
 #include "util/perf_context_imp.h"
 #include "util/statistics.h"
+#include "util/util.h"
 
 namespace rocksdb {
 
@@ -105,6 +106,7 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
         } else if (kMerge == state_) {
           assert(merge_operator_ != nullptr);
           state_ = kFound;
+          TRACE << "Does this happen with YCSB or QuizUp?\n";
           if (value_ != nullptr) {
             Status merge_status =
                 MergeHelper::TimedFullMerge(merge_operator_, user_key_, &value,
@@ -140,6 +142,7 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
         return false;
 
       case kTypeMerge:
+        TRACE << "Does it happen with YCSB or QuizUp?\n";
         assert(state_ == kNotFound || state_ == kMerge);
         state_ = kMerge;
         merge_context_->PushOperand(value, value_pinned);

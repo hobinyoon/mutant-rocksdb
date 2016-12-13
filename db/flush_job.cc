@@ -52,6 +52,7 @@
 #include "util/stop_watch.h"
 #include "util/sync_point.h"
 #include "util/thread_status_util.h"
+#include "util/util.h"
 
 namespace rocksdb {
 
@@ -256,6 +257,22 @@ Status FlushJob::WriteLevel0Table() {
       total_num_deletes += m->num_deletes();
       total_memory_usage += m->ApproximateMemoryUsage();
     }
+
+    // Mutant: a SSTable is created from flush
+    //
+    // Log(InfoLogLevel::INFO_LEVEL, db_options_.info_log, "[%s] [JOB %d] %s\n",
+    // 		cfd_->GetName().c_str(), job_context_->job_id, Util::StackTrace(1).c_str());
+    //
+    // rocksdb::FlushJob::WriteLevel0Table()
+    // rocksdb::FlushJob::Run(rocksdb::FileMetaData*)
+    // rocksdb::DBImpl::FlushMemTableToOutputFile(rocksdb::ColumnFamilyData*, rocksdb::MutableCFOptions const&, bool*, rocksdb::JobContext*, rocksdb::LogBuffer*)
+    // rocksdb::DBImpl::BackgroundFlush(bool*, rocksdb::JobContext*, rocksdb::LogBuffer*)
+    // rocksdb::DBImpl::BackgroundCallFlush()
+    // rocksdb::ThreadPool::BGThread(unsigned long)
+    //
+    // /tmp/librocksdbjni3564488305057096726.so(+0x2ef1e3) [0x7f15cd9741e3]
+    // /lib/x86_64-linux-gnu/libpthread.so.0(+0x8184) [0x7f16d3d37184]
+    // /lib/x86_64-linux-gnu/libc.so.6(clone+0x6d) [0x7f16d424b37d]
 
     event_logger_->Log() << "job" << job_context_->job_id << "event"
                          << "flush_started"

@@ -70,12 +70,16 @@ void EventHelpers::LogAndNotifyTableFileCreationFinished(
                             table_properties.num_entries)
               << "num_data_blocks" << table_properties.num_data_blocks
               << "num_entries" << table_properties.num_entries
-              << "filter_policy_name" << table_properties.filter_policy_name;
+              << "filter_policy_name" << table_properties.filter_policy_name
+              << "reason" << reason
+              ;
 
       // user collected properties
       for (const auto& prop : table_properties.readable_properties) {
         jwriter << prop.first << prop.second;
       }
+
+      // Mutant: May want to log key range. look for smallestkey
       jwriter.EndObject();
     }
     jwriter.EndObject();

@@ -97,6 +97,7 @@
 #include "util/sync_point.h"
 #include "util/thread_status_updater.h"
 #include "util/thread_status_util.h"
+#include "util/util.h"
 #include "util/xfunc.h"
 
 namespace rocksdb {
@@ -3841,6 +3842,7 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
   }
   if (!done) {
     PERF_TIMER_GUARD(get_from_output_files_time);
+    // Mutant: This is where you read SSTables
     sv->current->Get(read_options, lkey, value, &s, &merge_context,
                      value_found);
     RecordTick(stats_, MEMTABLE_MISS);

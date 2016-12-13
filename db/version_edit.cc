@@ -7,6 +7,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include <boost/format.hpp>
+
 #include "db/version_edit.h"
 
 #include "db/version_set.h"
@@ -585,6 +587,17 @@ std::string VersionEdit::DebugJSON(int edit_num, bool hex_key) const {
   jw.EndObject();
 
   return jw.Get();
+}
+
+
+std::ostream& operator << (std::ostream& os, const FdWithKeyRange& f) {
+  os << boost::format("%d %d [%s, %s]")
+    % f.fd.GetNumber()
+    % f.fd.GetPathId()
+    % ExtractUserKey(f.smallest_key).ToString()
+    % ExtractUserKey(f.largest_key).ToString()
+    ;
+  return os;
 }
 
 }  // namespace rocksdb

@@ -134,6 +134,9 @@ struct FdWithKeyRange {
       : fd(_fd), smallest_key(_smallest_key), largest_key(_largest_key) {}
 };
 
+std::ostream& operator << (std::ostream& os, const FdWithKeyRange& f);
+
+
 // Data structure to store an array of FdWithKeyRange in one level
 // Actual data is guaranteed to be stored closely
 struct LevelFilesBrief {
