@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <iostream>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -27,6 +28,8 @@ enum class TableFileCreationReason {
   kCompaction,
   kRecovery,
 };
+
+std::ostream& operator << (std::ostream& s, const TableFileCreationReason r);
 
 struct TableFileCreationBriefInfo {
   // the name of the database where the file was created

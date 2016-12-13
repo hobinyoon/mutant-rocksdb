@@ -258,6 +258,8 @@ util/build_version.cc: FORCE
 	  cmp -s $@-t $@ && rm -f $@-t || mv -f $@-t $@;		\
 	else mv -f $@-t $@; fi
 
+#$(info $$LIB_SOURCES is [${LIB_SOURCES}])
+#$(info $$TOOL_LIB_SOURCES is [${TOOL_LIB_SOURCES}])
 LIBOBJECTS = $(LIB_SOURCES:.cc=.o)
 LIBOBJECTS += $(TOOL_LIB_SOURCES:.cc=.o)
 MOCKOBJECTS = $(MOCK_LIB_SOURCES:.cc=.o)
@@ -1401,6 +1403,7 @@ rocksdbjavastaticpublish: rocksdbjavastaticrelease
 	mvn gpg:sign-and-deploy-file -Durl=https://oss.sonatype.org/service/local/staging/deploy/maven2/ -DrepositoryId=sonatype-nexus-staging -DpomFile=java/rocksjni.pom -Dfile=java/target/rocksdbjni-$(ROCKSDB_MAJOR).$(ROCKSDB_MINOR).$(ROCKSDB_PATCH).jar
 
 # A version of each $(LIBOBJECTS) compiled with -fPIC
+#$(info $$LIBOBJECTS is [${LIBOBJECTS}])
 java_libobjects = $(patsubst %,jl/%,$(LIBOBJECTS))
 CLEAN_FILES += jl
 
@@ -1421,13 +1424,15 @@ $(JNI_NATIVE_SOURCES:.cc=.o):%.o:%.cc rocksdbjava1
 	$(AM_V_at)$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -c $< $(JAVA_LDFLAGS) $(COVERAGEFLAGS) -o $@
 
 rocksdbjava2: rocksdbjava1 $(jni_native_objs)
-#	$(info $$JNI_NATIVE_SOURCES iss [${JNI_NATIVE_SOURCES}])
+#	$(info $$JNI_NATIVE_SOURCES is [${JNI_NATIVE_SOURCES}])
 #	$(info $$java_libobjects is [${java_libobjects}])
 #	$(AM_V_at)$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -o ./java/target/$(ROCKSDBJNILIB) $(JNI_NATIVE_SOURCES) $(java_libobjects) $(JAVA_LDFLAGS) $(COVERAGEFLAGS)
 	$(AM_V_at)$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC \
 		-o ./java/target/$(ROCKSDBJNILIB) \
 		$(jni_native_objs) \
+		\
 		$(java_libobjects) \
+		\
 		$(JAVA_LDFLAGS) $(COVERAGEFLAGS)
 	$(AM_V_at)cd java;jar -cf target/$(ROCKSDB_JAR) HISTORY*.md
 	$(AM_V_at)cd java/target;jar -uf $(ROCKSDB_JAR) $(ROCKSDBJNILIB)

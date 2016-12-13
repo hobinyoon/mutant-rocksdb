@@ -27,6 +27,7 @@ LIB_SOURCES =                                                   \
   db/flush_scheduler.cc                                         \
   db/forward_iterator.cc                                        \
   db/internal_stats.cc                                          \
+  db/listener.cc                                                \
   db/log_reader.cc                                              \
   db/log_writer.cc                                              \
   db/managed_iterator.cc                                        \
@@ -178,6 +179,7 @@ LIB_SOURCES =                                                   \
   util/thread_status_updater_debug.cc                           \
   util/thread_status_util.cc                                    \
   util/thread_status_util_debug.cc                              \
+  util/util.cc                                                  \
   util/xfunc.cc                                                 \
   util/xxhash.cc                                                \
 
