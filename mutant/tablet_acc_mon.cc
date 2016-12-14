@@ -1,3 +1,4 @@
+#include <boost/algorithm/string/join.hpp>
 #include <boost/format.hpp>
 
 #include "mutant/tablet_acc_mon.h"
@@ -7,36 +8,24 @@ using namespace std;
 
 namespace rocksdb {
 
-class _MemtAccCnt {
+struct _AccCnt {
   // The number of accesses to the MemTable. The requested record may or may
   // not be there.
   std::atomic<long> cnt;
   bool discarded = false;
+  // Set to true right before getting logged for the last time
   bool loggedAfterDiscarded = false;
 
-public:
-  _MemtAccCnt(long cnt_)
+  _AccCnt(long cnt_)
     : cnt(cnt_)
   { }
 
   void Increment() {
     cnt ++;
   }
-};
 
-
-class _SstAccCnt {
-  std::atomic<long> cnt;
-  bool deleted = false;
-  bool loggedAfterDiscarded = false;
-
-public:
-  _SstAccCnt(long cnt_)
-    : cnt(cnt_)
-  { }
-
-  void Increment() {
-    cnt ++;
+  long GetAndReset() {
+    return cnt.exchange(0);
   }
 };
 
@@ -47,10 +36,15 @@ TabletAccMon& TabletAccMon::_GetInst() {
 }
 
 
+// This object is not released, since it's a singleton object.
 TabletAccMon::TabletAccMon()
 : _updatedSinceLastOutput(false)
+  , _reporter(thread(bind(&rocksdb::TabletAccMon::_ReporterRun, this)))
 {
   TRACE << "TabletAccMon created\n";
+
+  // http://stackoverflow.com/questions/7381757/c-terminate-called-without-an-active-exception
+  _reporter.detach();
 }
 
 
@@ -64,9 +58,13 @@ void TabletAccMon::_MemtRead(void* m) {
 
     auto it2 = _memtAccCnt.find(m);
     if (it2 == _memtAccCnt.end()) {
-      _memtAccCnt[m] = new _MemtAccCnt(1);
-      // TODO
-      //_or.Wakeup();
+      _memtAccCnt[m] = new _AccCnt(1);
+      // Force reporting when a new Memtable is created. This may be helpful
+      // for logging the exact time of creations/deletions when Memtable
+      // creation/deletion events are not logged.
+      //
+      // Better log the creation/deletion events explicitly.
+      //_ReporterWakeup();
     } else {
       (it2->second)->Increment();
     }
@@ -91,9 +89,12 @@ void TabletAccMon::_SstRead(uint64_t s) {
 
     auto it2 = _sstAccCnt.find(s);
     if (it2 == _sstAccCnt.end()) {
-      _sstAccCnt[s] = new _SstAccCnt(1);
-      // TODO
-      //_or.Wakeup();
+      _sstAccCnt[s] = new _AccCnt(1);
+      // Force reporting
+      //
+      // TODO: Not sure if you need this. SSTable creation event is already
+      // logged.
+      //_ReporterWakeup();
     } else {
       (it2->second)->Increment();
     }
@@ -101,7 +102,84 @@ void TabletAccMon::_SstRead(uint64_t s) {
     (it->second)->Increment();
   }
 
-  TRACE << boost::format("Mutant: Read SSTable %d\n") % s;
+  //TRACE << boost::format("Mutant: Read SSTable %d\n") % s;
+}
+
+
+void TabletAccMon::_ReporterRun() {
+  try {
+    while (true) {
+      _ReporterSleep();
+
+      // A 2-level check. _reporter_sleep_cv alone is not enough.
+      if (! _updatedSinceLastOutput.exchange(false))
+        continue;
+
+      // Remove discarded MemTables and SSTables after logging for the last time
+      for (auto i: _memtAccCnt) {
+        if (i.second->discarded)
+          i.second->loggedAfterDiscarded = true;
+      }
+      for (auto i: _sstAccCnt) {
+        if (i.second->discarded)
+          i.second->loggedAfterDiscarded = true;
+      }
+
+      // Print out the access stat. The entries are already sorted numerically.
+      vector<string> outEntries;
+      for (auto i: _memtAccCnt) {
+        long c = i.second->GetAndReset();
+        if (c > 0)
+          outEntries.push_back(str(boost::format("m%s:%s") % i.first % c));
+      }
+      for (auto i: _sstAccCnt) {
+        long c = i.second->GetAndReset();
+        if (c > 0)
+          outEntries.push_back(str(boost::format("s%d:%s") % i.first % c));
+      }
+      if (outEntries.size() > 0)
+        TRACE << boost::format("Mutant: TabletAccCnt: %s\n") % boost::algorithm::join(outEntries, " ");
+
+      // Remove Memtables and SSTables that are discarded and written to logs
+      for (auto it = _memtAccCnt.cbegin(); it != _memtAccCnt.cend(); ) {
+        if (it->second->loggedAfterDiscarded) {
+          it = _memtAccCnt.erase(it);
+        } else {
+          it ++;
+        }
+      }
+      for (auto it = _sstAccCnt.cbegin(); it != _sstAccCnt.cend(); ) {
+        if (it->second->loggedAfterDiscarded) {
+          it = _sstAccCnt.erase(it);
+        } else {
+          it ++;
+        }
+      }
+    }
+  } catch (const exception& e) {
+    TRACE << boost::format("Exception: %s\n") % e.what();
+    exit(0);
+  }
+}
+
+
+static const long reportIntervalMs = 1000;
+
+void TabletAccMon::_ReporterSleep() {
+  // http://en.cppreference.com/w/cpp/thread/condition_variable/wait_for
+  std::unique_lock<std::mutex> lk(_reporter_sleep_mutex);
+  static const auto wait_dur = std::chrono::milliseconds(reportIntervalMs);
+  _reporter_sleep_cv.wait_for(lk, wait_dur, [&](){return _reporter_wakeupnow;});
+  _reporter_wakeupnow = false;
+}
+
+
+void TabletAccMon::_ReporterWakeup() {
+  {
+    std::unique_lock<std::mutex> lk(_reporter_sleep_mutex);
+    _reporter_wakeupnow = true;
+  }
+  _reporter_sleep_cv.notify_one();
 }
 
 
@@ -143,24 +221,6 @@ void TabletAccMon::SstRead(uint64_t s) {
 //
 // public class MemSsTableAccessMon
 // {
-//
-//     // These are for the initial get-and-set synchronizations.
-//     private static Object _ssTableAccCntLock = new Object();
-//
-//     private static OutputRunnable _or = null;
-//     private static Thread _outThread = null;
-//     private static final Logger logger = LoggerFactory.getLogger(MemSsTableAccessMon.class);
-//
-//     static {
-//         _or = new OutputRunnable();
-//         _outThread = new Thread(_or);
-//         _outThread.setName("MemSsTAccMon");
-//         _outThread.start();
-//         // Not sure where Cassandra handles SIGINT or SIGTERM, where I can
-//         // join() and clean up _outThread. It might be a crash only software
-//         // design.
-//     }
-//
 //     // Called when a ColumnFamilyStore (table) is created.
 //     public static void Reset() {
 //         _memtAccCnt.clear();
@@ -169,26 +229,6 @@ void TabletAccMon::SstRead(uint64_t s) {
 //         logger.warn("Mutant: Node configuration:[{}]", Config.GetNodeConfigStr());
 //     }
 //
-//     // These can be rewritten with test and test-and-set if needed.
-//     //
-//     //public static void Update(SSTableReader r) {
-//     //    Descriptor sst_desc = r.descriptor;
-//     //
-//     //    // The race condition (time of check and modify) that may overwrite the
-//     //    // first put() is harmless. It avoids an expensive locking.
-//     //    // Log right after the first access to a tablet, i.e., right after the
-//     //    // creation of _SSTableAccCnt(). It will help visualize the gap between
-//     //    // the creation of the tmp tablet and the first access to the regular
-//     //    // tablet.
-//     //    if (_ssTableAccCnt.get(sst_desc) == null) {
-//     //        _ssTableAccCnt.put(sst_desc, new _SSTableAccCnt(r));
-//     //        _updatedSinceLastOutput = true;
-//     //        _or.Wakeup();
-//     //    } else {
-//     //        _updatedSinceLastOutput = true;
-//     //    }
-//     //}
-//     //
 //     //public static void BloomfilterPositive(SSTableReader r) {
 //     //    Descriptor sst_desc = r.descriptor;
 //     //
@@ -205,29 +245,17 @@ void TabletAccMon::SstRead(uint64_t s) {
 //     //    }
 //     //}
 //
-//     public static long GetNumSstNeedToReadDataFile(SSTableReader r) {
-//         _SSTableAccCnt sstAC = _ssTableAccCnt.get(r.descriptor);
-//         if (sstAC == null) {
-//             // TODO: what was this?
-//             // Harmless
-//             return 0;
-//         } else {
-//             return sstAC.numNeedToReadDataFile();
-//         }
-//     }
-//
-//
 //     // MemTable created
 //     public static void Created(Memtable m) {
 //         logger.warn("Mutant: MemtCreated {}", m);
 //         if (_memtAccCnt.get(m) == null)
-//             _memtAccCnt.put(m, new _MemtAccCnt(0));
+//             _memtAccCnt.put(m, new _AccCnt(0));
 //         _or.Wakeup();
 //     }
 //
 //     // MemTable discarded
 //     public static void Discarded(Memtable m) {
-//         _MemtAccCnt v = _memtAccCnt.get(m);
+//         _AccCnt v = _memtAccCnt.get(m);
 //         if (v == null) {
 //             // Can a memtable be discarded without being accessed at all? I'm
 //             // not sure, but let's not throw an exception.
@@ -238,32 +266,6 @@ void TabletAccMon::SstRead(uint64_t s) {
 //         _updatedSinceLastOutput = true;
 //         logger.warn("Mutant: MemtDiscard {}", m);
 //         _or.Wakeup();
-//     }
-//
-//     private static SimpleDateFormat _sdf = new SimpleDateFormat("yyMMdd-HHmmss.SSS");
-//
-//     public static void SstOpened(SSTableReader r) {
-//         Timestamp min_ts = new Timestamp(r.getMinTimestamp() / 1000);
-//         Timestamp max_ts = new Timestamp(r.getMaxTimestamp() / 1000);
-//         logger.warn("Mutant: SstOpened descriptor={} openReason={} bytesOnDisk()={}"
-//                 + " level={} minTimestamp={} maxTimestamp={} first.getToken()={} last.getToken()={}"
-//                 , r.descriptor, r.openReason, r.bytesOnDisk()
-//                 , r.getSSTableLevel()
-//                 , _sdf.format(min_ts), _sdf.format(max_ts)
-//                 , r.first.getToken(), r.last.getToken()
-//                 );
-//     }
-//
-//     public static void SstCreated(SSTableReader r) {
-//         Timestamp min_ts = new Timestamp(r.getMinTimestamp() / 1000);
-//         Timestamp max_ts = new Timestamp(r.getMaxTimestamp() / 1000);
-//         logger.warn("Mutant: SstCreated descriptor={} openReason={} bytesOnDisk()={}"
-//                 + " level={} minTimestamp={} maxTimestamp={} first.getToken()={} last.getToken()={}"
-//                 , r.descriptor, r.openReason, r.bytesOnDisk()
-//                 , r.getSSTableLevel()
-//                 , _sdf.format(min_ts), _sdf.format(max_ts)
-//                 , r.first.getToken(), r.last.getToken()
-//                 );
 //     }
 //
 //     // SSTable discarded
@@ -279,124 +281,5 @@ void TabletAccMon::SstRead(uint64_t s) {
 //         _updatedSinceLastOutput = true;
 //         logger.warn("Mutant: SstDeleted {}", d);
 //         _or.Wakeup();
-//     }
-//
-//     private static class OutputRunnable implements Runnable {
-//         static final long reportIntervalMs =
-//             DatabaseDescriptor.getMutantOptions().tablet_access_stat_report_interval_in_ms;
-//
-//         private final Object _sleepLock = new Object();
-//
-//         void Wakeup() {
-//             synchronized (_sleepLock) {
-//                 _sleepLock.notify();
-//             }
-//         }
-//
-//         public void run() {
-//             // Sort lexicographcally with Memtables go first
-//             class OutputComparator implements Comparator<String> {
-//                 @Override
-//                 public int compare(String s1, String s2) {
-//                     if (s1.startsWith("Memtable-")) {
-//                         if (s2.startsWith("Memtable-")) {
-//                             return s1.compareTo(s2);
-//                         } else {
-//                             return -1;
-//                         }
-//                     } else {
-//                         if (s2.startsWith("Memtable-")) {
-//                             return 1;
-//                         } else {
-//                             return s1.compareTo(s2);
-//                         }
-//                     }
-//                 }
-//             }
-//             OutputComparator oc = new OutputComparator();
-//
-//             while (true) {
-//                 synchronized (_sleepLock) {
-//                     try {
-//                         _sleepLock.wait(reportIntervalMs);
-//                     } catch(InterruptedException e) {
-//                         // It can wake up early to process Memtable /
-//                         // SSTable deletion events
-//                     }
-//                 }
-//
-//                 // A non-strict but low-overhead serialization
-//                 if (! _updatedSinceLastOutput)
-//                     continue;
-//                 _updatedSinceLastOutput = false;
-//
-//                 // Remove discarded MemTables and SSTables after logging for the last time
-//                 for (Iterator it = _memtAccCnt.entrySet().iterator(); it.hasNext(); ) {
-//                     Map.Entry pair = (Map.Entry) it.next();
-//                     _MemtAccCnt v = (_MemtAccCnt) pair.getValue();
-//                     if (v.discarded)
-//                         v.loggedAfterDiscarded = true;
-//                 }
-//                 // Remove deleted SSTables in the same way
-//                 for (Iterator it = _ssTableAccCnt.entrySet().iterator(); it.hasNext(); ) {
-//                     Map.Entry pair = (Map.Entry) it.next();
-//                     _SSTableAccCnt v = (_SSTableAccCnt) pair.getValue();
-//                     if (v.deleted)
-//                         v.loggedAfterDiscarded = true;
-//                 }
-//
-//                 List<String> outEntries = new ArrayList();
-//                 for (Iterator it = _memtAccCnt.entrySet().iterator(); it.hasNext(); ) {
-//                     Map.Entry pair = (Map.Entry) it.next();
-//                     Memtable m = (Memtable) pair.getKey();
-//                     outEntries.add(String.format("%s-%s"
-//                                 , m.toString()
-//                                 , pair.getValue().toString()));
-//                 }
-//
-//                 // Note: Could reduce the log by printing out the diff.
-//                 // SSTables without changes in counts are not printed.
-//                 for (Iterator it = _ssTableAccCnt.entrySet().iterator(); it.hasNext(); ) {
-//                     Map.Entry pair = (Map.Entry) it.next();
-//                     Descriptor d = (Descriptor) pair.getKey();
-//                     outEntries.add(String.format("%02d:%s"
-//                                 //, d.cfname.substring(0, 2)
-//                                 , d.generation
-//                                 , pair.getValue().toString()));
-//                 }
-//
-//                 // Remove Memtables and SSTables that are discarded and written to logs
-//                 for (Iterator it = _memtAccCnt.entrySet().iterator(); it.hasNext(); ) {
-//                     Map.Entry pair = (Map.Entry) it.next();
-//                     _MemtAccCnt v = (_MemtAccCnt) pair.getValue();
-//                     if (v.loggedAfterDiscarded)
-//                         it.remove();
-//                 }
-//                 for (Iterator it = _ssTableAccCnt.entrySet().iterator(); it.hasNext(); ) {
-//                     Map.Entry pair = (Map.Entry) it.next();
-//                     _SSTableAccCnt v = (_SSTableAccCnt) pair.getValue();
-//                     if (v.loggedAfterDiscarded)
-//                         it.remove();
-//                 }
-//
-//                 if (outEntries.size() == 0)
-//                     continue;
-//
-//                 Collections.sort(outEntries, oc);
-//
-//                 StringBuilder sb = new StringBuilder(1000);
-//                 boolean first = true;
-//                 for (String i: outEntries) {
-//                     if (first) {
-//                         first = false;
-//                     } else {
-//                         sb.append(" ");
-//                     }
-//                     sb.append(i);
-//                 }
-//
-//                 logger.warn("Mutant: TabletAccessStat {}", sb.toString());
-//             }
-//         }
 //     }
 // }
