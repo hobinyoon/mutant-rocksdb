@@ -64,12 +64,12 @@ void Get(const string& k) {
 	static const auto ro = ReadOptions();
 	Status s = _db->Get(ro, k, &v);
   if (s.IsNotFound()) {
-    Cons::P(boost::format("Key %s not found") % k);
+    //Cons::P(boost::format("Key %s not found") % k);
     return;
   }
 	if (! s.ok())
 		THROW("Get failed");
-  Cons::P(boost::format("Value=%s") % v);
+  //Cons::P(boost::format("Value=%s") % v);
 }
 
 
@@ -95,9 +95,19 @@ int main(int argc, char* argv[]) {
 			THROW("DB::Open failed");
 
 		//Insert(    0, 20000);
-		Get("0000010002");
+    for (int i = 0; i < 100; i ++) {
+      Get("0000010001");
+    }
+    sleep(1.5);
 
-    sleep(2);
+    //Insert(0, 1);
+    Get("0000000000");
+
+    //Get("0");
+    Get("A");
+
+    // Give some time for TabletAccMon to print stuff
+    sleep(5);
 
 		delete _db;
 	} catch (const exception& e) {
