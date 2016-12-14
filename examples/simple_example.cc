@@ -5,16 +5,19 @@
 #include <cstdio>
 #include <string>
 
+#include <boost/format.hpp>
+
 #include "rocksdb/db.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
 
 using namespace rocksdb;
 
-std::string kDBPath = "/tmp/rocksdb_simple_example";
 
 int main() {
-  DB* db;
+  std::string kDBPath = str(boost::format("%s/work/rocksdb-data1") % getenv("HOME"));
+  std::cout << kDBPath << "\n";
+
   Options options;
   // Optimize RocksDB. This is the easiest way to get RocksDB to perform well
   options.IncreaseParallelism();
@@ -23,6 +26,7 @@ int main() {
   options.create_if_missing = true;
 
   // open DB
+  DB* db;
   Status s = DB::Open(options, kDBPath, &db);
   assert(s.ok());
 

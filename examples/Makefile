@@ -16,7 +16,8 @@ all: simple_example
 #simple_example: librocksdb simple_example.cc
 #	$(CXX) $(CXXFLAGS) $@.cc -o$@ ../librocksdb.a -I../include -O2 -std=c++11 $(PLATFORM_LDFLAGS) $(PLATFORM_CXXFLAGS) $(EXEC_LDFLAGS)
 simple_example: librocksdb simple_example.cc
-	$(CXX) $(CXXFLAGS) -I../include -O2 -std=c++11 $(PLATFORM_LDFLAGS) $(PLATFORM_CXXFLAGS) $(EXEC_LDFLAGS) -Wl,--as-needed -ldl -L.. $@.cc -o$@ -lrocksdb
+	$(CXX) $(CXXFLAGS) -I../include -O2 -std=c++11 $(PLATFORM_LDFLAGS) $(PLATFORM_CXXFLAGS) $(EXEC_LDFLAGS) -Wl,--as-needed -ldl -L.. $@.cc -o$@ \
+		-lrocksdb -lboost_regex
 
 #column_families_example: librocksdb column_families_example.cc
 #	$(CXX) $(CXXFLAGS) $@.cc -o$@ ../librocksdb.a -I../include -O2 -std=c++11 $(PLATFORM_LDFLAGS) $(PLATFORM_CXXFLAGS) $(EXEC_LDFLAGS)
