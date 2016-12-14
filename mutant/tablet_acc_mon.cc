@@ -72,7 +72,7 @@ void TabletAccMon::_MemtRead(void* m) {
     (it->second)->Increment();
   }
 
-  TRACE << boost::format("Mutant: Memtable %p accessed\n") % m;
+  //TRACE << boost::format("Mutant: Memtable %p accessed\n") % m;
 }
 
 
