@@ -59,6 +59,7 @@
 #include "db/xfunc_test_points.h"
 #include "memtable/hash_linklist_rep.h"
 #include "memtable/hash_skiplist_rep.h"
+#include "mutant/tablet_acc_mon.h"
 #include "port/likely.h"
 #include "port/port.h"
 #include "rocksdb/cache.h"
@@ -5813,6 +5814,9 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
     *dbptr = impl;
     impl->opened_successfully_ = true;
     impl->MaybeScheduleFlushOrCompaction();
+
+    // Assume TabletAccMon is used by a single DB instance
+    TabletAccMon::Init(&(impl->event_logger_));
   }
   impl->mutex_.Unlock();
 

@@ -6,11 +6,15 @@
 #include <mutex>
 #include <thread>
 
+#include "util/event_logger.h"
+
 namespace rocksdb {
 
 class _AccCnt;
 
 class TabletAccMon {
+  EventLogger* _logger = NULL;
+
   std::atomic<bool> _updatedSinceLastOutput;
 
   // SSTable access monitoring is for the SSTable migration decisions.
@@ -30,6 +34,7 @@ class TabletAccMon {
 
   TabletAccMon();
 
+  void _Init(EventLogger* logger);
   void _MemtRead(void* m);
   void _SstRead(uint64_t s);
 
@@ -38,6 +43,7 @@ class TabletAccMon {
   void _ReporterWakeup();
 
 public:
+  static void Init(EventLogger* logger);
   static void MemtRead(void* m);
   static void SstRead(uint64_t s);
 };

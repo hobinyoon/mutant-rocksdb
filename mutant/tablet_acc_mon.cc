@@ -1,6 +1,7 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/format.hpp>
 
+#include "db/event_helpers.h"
 #include "mutant/tablet_acc_mon.h"
 #include "util/util.h"
 
@@ -41,10 +42,20 @@ TabletAccMon::TabletAccMon()
 : _updatedSinceLastOutput(false)
   , _reporter(thread(bind(&rocksdb::TabletAccMon::_ReporterRun, this)))
 {
-  TRACE << "TabletAccMon created\n";
-
   // http://stackoverflow.com/questions/7381757/c-terminate-called-without-an-active-exception
   _reporter.detach();
+}
+
+
+void TabletAccMon::_Init(EventLogger* logger) {
+  _logger = logger;
+  //TRACE << "TabletAccMon initialized\n";
+
+  JSONWriter jwriter;
+  EventHelpers::AppendCurrentTime(&jwriter);
+  jwriter << "mutant_table_acc_mon_init";
+  jwriter.EndObject();
+  _logger->Log(jwriter);
 }
 
 
@@ -126,19 +137,57 @@ void TabletAccMon::_ReporterRun() {
       }
 
       // Print out the access stat. The entries are already sorted numerically.
-      vector<string> outEntries;
-      for (auto i: _memtAccCnt) {
-        long c = i.second->GetAndReset();
-        if (c > 0)
-          outEntries.push_back(str(boost::format("m%s:%s") % i.first % c));
+      {
+        if (true) {
+          // Output to the rocksdb log
+          JSONWriter jwriter;
+          EventHelpers::AppendCurrentTime(&jwriter);
+          jwriter << "mutant_table_acc_cnt";
+          {
+            jwriter.StartObject();
+            jwriter << "memt";
+            {
+              vector<string> vs;
+              for (auto i: _memtAccCnt) {
+                long c = i.second->GetAndReset();
+                if (c > 0) {
+                  // This doesn't work. I guess only constant strings can be keys
+                  //jwriter << i.first << c;
+                  vs.push_back(str(boost::format("%p:%d") % i.first % c));
+                }
+              }
+              jwriter << boost::algorithm::join(vs, " ");
+            }
+            jwriter << "sst";
+            {
+              vector<string> vs;
+              for (auto i: _sstAccCnt) {
+                long c = i.second->GetAndReset();
+                if (c > 0)
+                  vs.push_back(str(boost::format("%p:%d") % i.first % c));
+              }
+              jwriter << boost::algorithm::join(vs, " ");
+            }
+            jwriter.EndObject();
+          }
+          _logger->Log(jwriter);
+        } else {
+          // Output to the client console
+          vector<string> outEntries;
+          for (auto i: _memtAccCnt) {
+            long c = i.second->GetAndReset();
+            if (c > 0)
+              outEntries.push_back(str(boost::format("m%s:%s") % i.first % c));
+          }
+          for (auto i: _sstAccCnt) {
+            long c = i.second->GetAndReset();
+            if (c > 0)
+              outEntries.push_back(str(boost::format("s%d:%s") % i.first % c));
+          }
+          if (outEntries.size() > 0)
+            TRACE << boost::format("Mutant: TabletAccCnt: %s\n") % boost::algorithm::join(outEntries, " ");
+        }
       }
-      for (auto i: _sstAccCnt) {
-        long c = i.second->GetAndReset();
-        if (c > 0)
-          outEntries.push_back(str(boost::format("s%d:%s") % i.first % c));
-      }
-      if (outEntries.size() > 0)
-        TRACE << boost::format("Mutant: TabletAccCnt: %s\n") % boost::algorithm::join(outEntries, " ");
 
       // Remove Memtables and SSTables that are discarded and written to logs
       for (auto it = _memtAccCnt.cbegin(); it != _memtAccCnt.cend(); ) {
@@ -183,14 +232,20 @@ void TabletAccMon::_ReporterWakeup() {
 }
 
 
+void TabletAccMon::Init(EventLogger* logger) {
+  static TabletAccMon& i = _GetInst();
+  i._Init(logger);
+}
+
+
 void TabletAccMon::MemtRead(void* m) {
-  TabletAccMon& i = _GetInst();
+  static TabletAccMon& i = _GetInst();
   i._MemtRead(m);
 }
 
 
 void TabletAccMon::SstRead(uint64_t s) {
-  TabletAccMon& i = _GetInst();
+  static TabletAccMon& i = _GetInst();
   i._SstRead(s);
 }
 

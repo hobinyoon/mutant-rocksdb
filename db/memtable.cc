@@ -597,7 +597,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s,
   }
 
   // Mutant: MemTable accessed. For a memtable ID, we use the address for
-  // now.  I don't see a ID.
+  // now.  I don't see a Memtable ID.
   TabletAccMon::MemtRead(this);
 
   // No change to value, since we have not yet found a Put/Delete
