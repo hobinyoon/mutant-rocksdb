@@ -9,6 +9,7 @@
 
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <set>
 #include <utility>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "db/dbformat.h"
 #include "util/arena.h"
 #include "util/autovector.h"
+#include "util/util.h"
 
 namespace rocksdb {
 
@@ -42,7 +44,15 @@ struct FileDescriptor {
   FileDescriptor(uint64_t number, uint32_t path_id, uint64_t _file_size)
       : table_reader(nullptr),
         packed_number_and_path_id(PackFileNumberAndPathId(number, path_id)),
-        file_size(_file_size) {}
+        file_size(_file_size)
+  {
+  }
+
+  FileDescriptor(const FileDescriptor& r)
+    : table_reader(r.table_reader)
+      , packed_number_and_path_id(r.packed_number_and_path_id)
+      , file_size(r.file_size)
+  { }
 
   FileDescriptor& operator=(const FileDescriptor& fd) {
     table_reader = fd.table_reader;

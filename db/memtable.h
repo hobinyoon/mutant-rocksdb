@@ -393,6 +393,10 @@ class MemTable {
   // No copying allowed
   MemTable(const MemTable&);
   MemTable& operator=(const MemTable&);
+
+  // Mutant
+  friend class TabletAccMon;
+  std::atomic<long> _num_reads;
 };
 
 extern const char* EncodeKey(std::string* scratch, const Slice& target);

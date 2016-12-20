@@ -84,7 +84,8 @@ MemTable::MemTable(const InternalKeyComparator& cmp,
                  : 0),
       prefix_extractor_(ioptions.prefix_extractor),
       flush_state_(FLUSH_NOT_REQUESTED),
-      env_(ioptions.env) {
+      env_(ioptions.env),
+      _num_reads(0) {
   UpdateFlushState();
   // something went wrong if we need to flush before inserting anything
   assert(!ShouldScheduleFlush());
@@ -95,9 +96,18 @@ MemTable::MemTable(const InternalKeyComparator& cmp,
         ioptions.bloom_locality, 6 /* hard coded 6 probes */, nullptr,
         moptions_.memtable_huge_page_size, ioptions.info_log));
   }
+
+  // Mutant. We use the address for the memtable ID. I don't see anything else
+  // that can be used.
+  TabletAccMon::MemtCreated(this);
 }
 
-MemTable::~MemTable() { assert(refs_ == 0); }
+MemTable::~MemTable() {
+  assert(refs_ == 0);
+
+  // Mutant
+  TabletAccMon::MemtDeleted(this);
+}
 
 size_t MemTable::ApproximateMemoryUsage() {
   size_t arena_usage = arena_.ApproximateMemoryUsage();
@@ -596,9 +606,9 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s,
     *seq = saver.seq;
   }
 
-  // Mutant: MemTable accessed. For a memtable ID, we use the address for
-  // now.  I don't see a Memtable ID.
-  TabletAccMon::MemtRead(this);
+  // Mutant
+  _num_reads ++;
+  TabletAccMon::Updated();
 
   // No change to value, since we have not yet found a Put/Delete
   if (!found_final_value && merge_in_progress) {

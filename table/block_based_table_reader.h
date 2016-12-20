@@ -14,6 +14,7 @@
 #include <utility>
 #include <string>
 
+#include "mutant/tablet_acc_mon.h"
 #include "rocksdb/options.h"
 #include "rocksdb/persistent_cache.h"
 #include "rocksdb/statistics.h"
@@ -23,6 +24,7 @@
 #include "table/table_reader.h"
 #include "util/coding.h"
 #include "util/file_reader_writer.h"
+#include "util/util.h"
 
 namespace rocksdb {
 
@@ -81,6 +83,7 @@ class BlockBasedTable : public TableReader {
                      const InternalKeyComparator& internal_key_comparator,
                      unique_ptr<RandomAccessFileReader>&& file,
                      uint64_t file_size, unique_ptr<TableReader>* table_reader,
+                     const FileDescriptor* fd,
                      bool prefetch_index_and_filter_in_cache = true,
                      bool skip_filters = false, int level = -1);
 
@@ -139,6 +142,11 @@ class BlockBasedTable : public TableReader {
   static Slice GetCacheKey(const char* cache_key_prefix,
                            size_t cache_key_prefix_size,
                            const BlockHandle& handle, char* cache_key);
+
+  // Mutant
+  long GetAndResetNumReads();
+  uint64_t SstId();
+
 
  private:
   template <class TValue>
@@ -232,8 +240,31 @@ class BlockBasedTable : public TableReader {
 
   static void SetupCacheKeyPrefix(Rep* rep, uint64_t file_size);
 
-  explicit BlockBasedTable(Rep* rep)
-      : rep_(rep), compaction_optimized_(false) {}
+  explicit BlockBasedTable(Rep* rep, const FileDescriptor* fd)
+      : rep_(rep), compaction_optimized_(false)
+        , _num_reads(0)
+  {
+    if (fd == NULL)
+      THROW("Unexpected");
+    _sst_id = fd->GetNumber();
+
+    TabletAccMon::SstOpened(this);
+
+    // Mutant: Figuring out which SSTable this object reads. Does this function
+    // read a part of the file?
+    //
+    //TRACE << Util::StackTrace(0) << "\n";
+    //
+    // rocksdb::BlockBasedTable::Open(rocksdb::ImmutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::BlockBasedTableOptions const&, rocksdb::InternalKeyComparator const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, bool, bool, int)
+    //
+    // rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, bool) const
+    //
+    // rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, bool, int, bool)
+    //
+    // rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, rocksdb::Cache::Handle**, bool, bool, rocksdb::HistogramImpl*, bool, int, bool)
+    //
+    // std::_Function_handler<void (), rocksdb::VersionBuilder::Rep::LoadTableHandlers(rocksdb::InternalStats*, int, bool)::{lambda()#1}>::_M_invoke(std::_Any_data const&)
+  }
 
   // Generate a cache key prefix from the file
   static void GenerateCachePrefix(Cache* cc,
@@ -248,6 +279,10 @@ class BlockBasedTable : public TableReader {
   // No copying allowed
   explicit BlockBasedTable(const TableReader&) = delete;
   void operator=(const TableReader&) = delete;
+
+  // Mutant
+  std::atomic<long> _num_reads;
+  uint64_t _sst_id;
 };
 
 }  // namespace rocksdb

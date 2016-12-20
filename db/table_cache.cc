@@ -109,10 +109,13 @@ Status TableCache::GetTableReader(
         new RandomAccessFileReader(std::move(file), ioptions_.env,
                                    ioptions_.statistics, record_read_stats,
                                    file_read_hist));
+    // Mutant: Added fd so that when BlockBasedTable() is constructed, you can
+    // monitor the per-file accesses.
     s = ioptions_.table_factory->NewTableReader(
         TableReaderOptions(ioptions_, env_options, internal_comparator,
                            skip_filters, level),
         std::move(file_reader), fd.GetFileSize(), table_reader,
+        &fd,
         prefetch_index_and_filter_in_cache);
     TEST_SYNC_POINT("TableCache::GetTableReader:0");
   }

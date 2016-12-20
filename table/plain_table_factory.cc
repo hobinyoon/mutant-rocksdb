@@ -18,6 +18,7 @@ Status PlainTableFactory::NewTableReader(
     const TableReaderOptions& table_reader_options,
     unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
     unique_ptr<TableReader>* table,
+    const FileDescriptor* fd,
     bool prefetch_index_and_filter_in_cache) const {
   return PlainTableReader::Open(
       table_reader_options.ioptions, table_reader_options.env_options,

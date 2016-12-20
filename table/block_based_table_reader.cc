@@ -14,8 +14,6 @@
 #include "db/dbformat.h"
 #include "db/pinned_iterators_manager.h"
 
-#include "mutant/tablet_acc_mon.h"
-
 #include "rocksdb/cache.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/env.h"
@@ -424,6 +422,9 @@ struct BlockBasedTable::Rep {
 
 BlockBasedTable::~BlockBasedTable() {
   Close();
+
+  TabletAccMon::SstClosed(this);
+
   delete rep_;
 }
 
@@ -519,6 +520,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
                              unique_ptr<RandomAccessFileReader>&& file,
                              uint64_t file_size,
                              unique_ptr<TableReader>* table_reader,
+                             const FileDescriptor* fd,
                              const bool prefetch_index_and_filter_in_cache,
                              const bool skip_filters, const int level) {
   table_reader->reset();
@@ -551,7 +553,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
   rep->internal_prefix_transform.reset(
       new InternalKeySliceTransform(rep->ioptions.prefix_extractor));
   SetupCacheKeyPrefix(rep, file_size);
-  unique_ptr<BlockBasedTable> new_table(new BlockBasedTable(rep));
+  unique_ptr<BlockBasedTable> new_table(new BlockBasedTable(rep, fd));
 
   // page cache options
   rep->persistent_cache_options =
@@ -1111,6 +1113,15 @@ InternalIterator* BlockBasedTable::NewIndexIterator(
   return iter;
 }
 
+
+long BlockBasedTable::GetAndResetNumReads() {
+  return _num_reads.exchange(0);
+}
+uint64_t BlockBasedTable::SstId() {
+  return _sst_id;
+}
+
+
 // Convert an index iterator value (i.e., an encoded BlockHandle)
 // into an iterator over the contents of the corresponding block.
 // If input_iter is null, new a iterator
@@ -1436,10 +1447,9 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
         //
         // TODO: How many blocks does a SSTable have?
         //
-        // Mutant: TODO: Update access statistics
-        if (fd) {
-          TabletAccMon::SstRead(fd->GetNumber());
-        }
+        // Mutant: Update access statistics
+        _num_reads ++;
+        TabletAccMon::Updated();
 
         BlockIter stack_biter;
         if (pin_blocks) {

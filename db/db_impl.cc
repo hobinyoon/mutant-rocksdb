@@ -441,6 +441,9 @@ DBImpl::~DBImpl() {
     mutex_.Lock();
   }
 
+  // Mutant. Synchronously report for the last time.
+  TabletAccMon::ReportAndWait();
+
   // Clean up obsolete files due to SuperVersion release.
   // (1) Need to delete to obsolete files before closing because RepairDB()
   // scans all existing files in the file system and builds manifest file.

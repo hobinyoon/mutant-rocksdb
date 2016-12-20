@@ -44,6 +44,7 @@ Status AdaptiveTableFactory::NewTableReader(
     const TableReaderOptions& table_reader_options,
     unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
     unique_ptr<TableReader>* table,
+    const FileDescriptor* fd,
     bool prefetch_index_and_filter_in_cache) const {
   Footer footer;
   auto s = ReadFooterFromFile(file.get(), file_size, &footer);
@@ -53,14 +54,14 @@ Status AdaptiveTableFactory::NewTableReader(
   if (footer.table_magic_number() == kPlainTableMagicNumber ||
       footer.table_magic_number() == kLegacyPlainTableMagicNumber) {
     return plain_table_factory_->NewTableReader(
-        table_reader_options, std::move(file), file_size, table);
+        table_reader_options, std::move(file), file_size, table, fd);
   } else if (footer.table_magic_number() == kBlockBasedTableMagicNumber ||
       footer.table_magic_number() == kLegacyBlockBasedTableMagicNumber) {
     return block_based_table_factory_->NewTableReader(
-        table_reader_options, std::move(file), file_size, table);
+        table_reader_options, std::move(file), file_size, table, fd);
   } else if (footer.table_magic_number() == kCuckooTableMagicNumber) {
     return cuckoo_table_factory_->NewTableReader(
-        table_reader_options, std::move(file), file_size, table);
+        table_reader_options, std::move(file), file_size, table, fd);
   } else {
     return Status::NotSupported("Unidentified table format");
   }

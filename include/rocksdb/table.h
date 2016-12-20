@@ -355,6 +355,7 @@ extern TableFactory* NewCuckooTableFactory(
 #endif  // ROCKSDB_LITE
 
 class RandomAccessFileReader;
+struct FileDescriptor;
 
 // A base class for table factories.
 class TableFactory {
@@ -391,6 +392,7 @@ class TableFactory {
       const TableReaderOptions& table_reader_options,
       unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
       unique_ptr<TableReader>* table_reader,
+      const FileDescriptor* fd,
       bool prefetch_index_and_filter_in_cache = true) const = 0;
 
   // Return a table builder to write to a file for this table type.

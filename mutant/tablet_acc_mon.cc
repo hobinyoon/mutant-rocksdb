@@ -1,35 +1,16 @@
+#include <atomic>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/format.hpp>
 
 #include "db/event_helpers.h"
+#include "db/version_edit.h"
 #include "mutant/tablet_acc_mon.h"
+#include "table/block_based_table_reader.h"
 #include "util/util.h"
 
 using namespace std;
 
 namespace rocksdb {
-
-struct _AccCnt {
-  // The number of accesses to the MemTable. The requested record may or may
-  // not be there.
-  std::atomic<long> cnt;
-  bool discarded = false;
-  // Set to true right before getting logged for the last time
-  bool loggedAfterDiscarded = false;
-
-  _AccCnt(long cnt_)
-    : cnt(cnt_)
-  { }
-
-  void Increment() {
-    cnt ++;
-  }
-
-  long GetAndReset() {
-    return cnt.exchange(0);
-  }
-};
-
 
 TabletAccMon& TabletAccMon::_GetInst() {
   static TabletAccMon i;
@@ -59,151 +40,146 @@ void TabletAccMon::_Init(EventLogger* logger) {
 }
 
 
-void TabletAccMon::_MemtRead(void* m) {
-  _updatedSinceLastOutput = true;
+void TabletAccMon::_MemtCreated(MemTable* m) {
+  lock_guard<mutex> lk(_memtSetLock);
 
-  // Test and test-and-set style
-  auto it = _memtAccCnt.find(m);
-  if (it == _memtAccCnt.end()) {
-    lock_guard<mutex> _(_memtAccCntLock);
+  //TRACE << boost::format("MemtCreated %p\n") % m;
 
-    auto it2 = _memtAccCnt.find(m);
-    if (it2 == _memtAccCnt.end()) {
-      _memtAccCnt[m] = new _AccCnt(1);
-      // Force reporting when a new Memtable is created. This may be helpful
-      // for logging the exact time of creations/deletions when Memtable
-      // creation/deletion events are not logged.
-      //
-      // Better log the creation/deletion events explicitly.
-      //_ReporterWakeup();
-    } else {
-      (it2->second)->Increment();
-    }
+  auto it = _memtSet.find(m);
+  if (it == _memtSet.end()) {
+    lock_guard<mutex> lk2(_memtSetLock2);
+    _memtSet.insert(m);
+    // Note: Log creation/deletion time, if needed. You don't need to wake up
+    // the reporter thread.
   } else {
-    (it->second)->Increment();
+    THROW("Unexpected");
   }
-
-  //TRACE << boost::format("Mutant: Memtable %p accessed\n") % m;
 }
 
 
-// I wonder how much overhead this Monitoring has.  Might be a good one to
-// present.
-void TabletAccMon::_SstRead(uint64_t s) {
-  _updatedSinceLastOutput = true;
+void TabletAccMon::_MemtDeleted(MemTable* m) {
+  lock_guard<mutex> lk(_memtSetLock);
 
-  // Test and test-and-set style. The longest path is taken only in the
-  // beginning when _sstAccCnt doesn't have s.
-  auto it = _sstAccCnt.find(s);
-  if (it == _sstAccCnt.end()) {
-    lock_guard<mutex> _(_sstAccCntLock);
+  //TRACE << boost::format("MemtDeleted %p\n") % m;
 
-    auto it2 = _sstAccCnt.find(s);
-    if (it2 == _sstAccCnt.end()) {
-      _sstAccCnt[s] = new _AccCnt(1);
-      // Force reporting
-      //
-      // TODO: Not sure if you need this. SSTable creation event is already
-      // logged.
-      //_ReporterWakeup();
-    } else {
-      (it2->second)->Increment();
-    }
+  auto it = _memtSet.find(m);
+  if (it == _memtSet.end()) {
+    THROW("Unexpected");
   } else {
-    (it->second)->Increment();
-  }
+    // Report for the last time before erasing the entry
+    _ReportAndWait();
 
-  //TRACE << boost::format("Mutant: Read SSTable %d\n") % s;
+    lock_guard<mutex> lk2(_memtSetLock2);
+    _memtSet.erase(it);
+  }
+}
+
+
+// FileDescriptor constructor/destructor is not good ones to monitor. They are
+// copyable and the same address is opened and closed multiple times.
+void TabletAccMon::_SstOpened(BlockBasedTable* bbt) {
+  lock_guard<mutex> lk(_sstSetLock);
+
+  //TRACE << boost::format("SstOpened %d\n") % bbt->SstId();
+
+  auto it = _sstSet.find(bbt);
+  if (it == _sstSet.end()) {
+    lock_guard<mutex> lk2(_sstSetLock2);
+    _sstSet.insert(bbt);
+  } else {
+    THROW("Unexpected");
+  }
+}
+
+
+void TabletAccMon::_SstClosed(BlockBasedTable* bbt) {
+  lock_guard<mutex> lk(_sstSetLock);
+
+  //TRACE << boost::format("SstClosed %d\n") % bbt->SstId();
+
+  auto it = _sstSet.find(bbt);
+  if (it == _sstSet.end()) {
+    THROW("Unexpected");
+  } else {
+    // Report for the last time before erasing the entry
+    _ReportAndWait();
+
+    lock_guard<mutex> lk2(_sstSetLock2);
+    _sstSet.erase(it);
+  }
+}
+
+
+void TabletAccMon::_Updated() {
+  _updatedSinceLastOutput = true;
 }
 
 
 void TabletAccMon::_ReporterRun() {
   try {
     while (true) {
-      _ReporterSleep();
-
-      // A 2-level check. _reporter_sleep_cv alone is not enough.
-      if (! _updatedSinceLastOutput.exchange(false))
-        continue;
-
-      // Remove discarded MemTables and SSTables after logging for the last time
-      for (auto i: _memtAccCnt) {
-        if (i.second->discarded)
-          i.second->loggedAfterDiscarded = true;
-      }
-      for (auto i: _sstAccCnt) {
-        if (i.second->discarded)
-          i.second->loggedAfterDiscarded = true;
-      }
-
-      // Print out the access stat. The entries are already sorted numerically.
+      // Sleep for reportIntervalMs or until woken up by another thread.
       {
-        if (true) {
+        static const long reportIntervalMs = 1000;
+        static const auto wait_dur = chrono::milliseconds(reportIntervalMs);
+        unique_lock<mutex> lk(_reporter_sleep_mutex);
+        _reporter_sleep_cv.wait_for(lk, wait_dur, [&](){return _reporter_wakeupnow;});
+        _reporter_wakeupnow = false;
+      }
+
+      {
+        unique_lock<mutex> lk(_reporting_mutex);
+
+        // A 2-level check. _reporter_sleep_cv alone is not enough, since this
+        // thread is woken up every second anyway.
+        //
+        // Print out the access stat. The entries are already sorted numerically.
+        if (_updatedSinceLastOutput) {
           // Output to the rocksdb log
           JSONWriter jwriter;
           EventHelpers::AppendCurrentTime(&jwriter);
           jwriter << "mutant_table_acc_cnt";
           {
             jwriter.StartObject();
-            jwriter << "memt";
             {
               vector<string> vs;
-              for (auto i: _memtAccCnt) {
-                long c = i.second->GetAndReset();
-                if (c > 0) {
-                  // This doesn't work. I guess only constant strings can be keys
-                  //jwriter << i.first << c;
-                  vs.push_back(str(boost::format("%p:%d") % i.first % c));
+              {
+                lock_guard<mutex> lk2(_memtSetLock2);
+                for (auto mt: _memtSet) {
+                  // Get-and-reset the read counter
+                  long c = mt->_num_reads.exchange(0);
+                  if (c > 0) {
+                    // This doesn't work. I guess only constant strings can be keys
+                    //jwriter << mt.first << c;
+                    vs.push_back(str(boost::format("%p:%d") % mt % c));
+                  }
                 }
               }
-              jwriter << boost::algorithm::join(vs, " ");
+              if (vs.size() > 0)
+                jwriter << "memt" << boost::algorithm::join(vs, " ");
             }
-            jwriter << "sst";
             {
               vector<string> vs;
-              for (auto i: _sstAccCnt) {
-                long c = i.second->GetAndReset();
-                if (c > 0)
-                  vs.push_back(str(boost::format("%p:%d") % i.first % c));
+              {
+                lock_guard<mutex> lk2(_sstSetLock2);
+                for (auto bbt: _sstSet) {
+                  // Get-and-reset the read counter
+                  long c = bbt->GetAndResetNumReads();
+                  if (c > 0)
+                    vs.push_back(str(boost::format("%d:%d") % bbt->SstId() % c));
+                }
               }
-              jwriter << boost::algorithm::join(vs, " ");
+              if (vs.size() > 0)
+                jwriter << "sst" << boost::algorithm::join(vs, " ");
             }
             jwriter.EndObject();
           }
           _logger->Log(jwriter);
-        } else {
-          // Output to the client console
-          vector<string> outEntries;
-          for (auto i: _memtAccCnt) {
-            long c = i.second->GetAndReset();
-            if (c > 0)
-              outEntries.push_back(str(boost::format("m%s:%s") % i.first % c));
-          }
-          for (auto i: _sstAccCnt) {
-            long c = i.second->GetAndReset();
-            if (c > 0)
-              outEntries.push_back(str(boost::format("s%d:%s") % i.first % c));
-          }
-          if (outEntries.size() > 0)
-            TRACE << boost::format("Mutant: TabletAccCnt: %s\n") % boost::algorithm::join(outEntries, " ");
+          _updatedSinceLastOutput = false;
         }
+        _reported = true;
       }
-
-      // Remove Memtables and SSTables that are discarded and written to logs
-      for (auto it = _memtAccCnt.cbegin(); it != _memtAccCnt.cend(); ) {
-        if (it->second->loggedAfterDiscarded) {
-          it = _memtAccCnt.erase(it);
-        } else {
-          it ++;
-        }
-      }
-      for (auto it = _sstAccCnt.cbegin(); it != _sstAccCnt.cend(); ) {
-        if (it->second->loggedAfterDiscarded) {
-          it = _sstAccCnt.erase(it);
-        } else {
-          it ++;
-        }
-      }
+      _reported_cv.notify_one();
     }
   } catch (const exception& e) {
     TRACE << boost::format("Exception: %s\n") % e.what();
@@ -212,23 +188,35 @@ void TabletAccMon::_ReporterRun() {
 }
 
 
-static const long reportIntervalMs = 1000;
-
-void TabletAccMon::_ReporterSleep() {
-  // http://en.cppreference.com/w/cpp/thread/condition_variable/wait_for
-  std::unique_lock<std::mutex> lk(_reporter_sleep_mutex);
-  static const auto wait_dur = std::chrono::milliseconds(reportIntervalMs);
-  _reporter_sleep_cv.wait_for(lk, wait_dur, [&](){return _reporter_wakeupnow;});
-  _reporter_wakeupnow = false;
-}
-
-
 void TabletAccMon::_ReporterWakeup() {
+  // This wakes up the waiting thread even if this is called before wait.
+  // _reporter_wakeupnow does the magic.
   {
-    std::unique_lock<std::mutex> lk(_reporter_sleep_mutex);
+    unique_lock<mutex> lk(_reporter_sleep_mutex);
     _reporter_wakeupnow = true;
   }
   _reporter_sleep_cv.notify_one();
+}
+
+
+void TabletAccMon::_ReportAndWait() {
+  // The whole reporting block needs to be protected for this.  When the
+  // reporter thread is ready entering the reporting block, the reporting block
+  // can be called twice, which is okay - the second one won't print out
+  // anything.
+  {
+    unique_lock<mutex> _(_reporting_mutex);
+    _reported = false;
+  }
+
+  //TRACE << "force reporting\n";
+  _ReporterWakeup();
+
+  // Wait for the reporter finish a reporting
+  {
+    unique_lock<mutex> lk(_reporting_mutex);
+    _reported_cv.wait(lk, [&](){return _reported;});
+  }
 }
 
 
@@ -238,15 +226,39 @@ void TabletAccMon::Init(EventLogger* logger) {
 }
 
 
-void TabletAccMon::MemtRead(void* m) {
+void TabletAccMon::MemtCreated(MemTable* m) {
   static TabletAccMon& i = _GetInst();
-  i._MemtRead(m);
+  i._MemtCreated(m);
 }
 
 
-void TabletAccMon::SstRead(uint64_t s) {
+void TabletAccMon::MemtDeleted(MemTable* m) {
   static TabletAccMon& i = _GetInst();
-  i._SstRead(s);
+  i._MemtDeleted(m);
+}
+
+
+void TabletAccMon::SstOpened(BlockBasedTable* bbt) {
+  static TabletAccMon& i = _GetInst();
+  i._SstOpened(bbt);
+}
+
+
+void TabletAccMon::SstClosed(BlockBasedTable* bbt) {
+  static TabletAccMon& i = _GetInst();
+  i._SstClosed(bbt);
+}
+
+
+void TabletAccMon::ReportAndWait() {
+  static TabletAccMon& i = _GetInst();
+  i._ReportAndWait();
+}
+
+
+void TabletAccMon::Updated() {
+  static TabletAccMon& i = _GetInst();
+  i._Updated();
 }
 
 }
@@ -278,7 +290,7 @@ void TabletAccMon::SstRead(uint64_t s) {
 // {
 //     // Called when a ColumnFamilyStore (table) is created.
 //     public static void Reset() {
-//         _memtAccCnt.clear();
+//         _memtSet.clear();
 //         _ssTableAccCnt.clear();
 //         logger.warn("Mutant: ResetMon");
 //         logger.warn("Mutant: Node configuration:[{}]", Config.GetNodeConfigStr());
@@ -303,14 +315,14 @@ void TabletAccMon::SstRead(uint64_t s) {
 //     // MemTable created
 //     public static void Created(Memtable m) {
 //         logger.warn("Mutant: MemtCreated {}", m);
-//         if (_memtAccCnt.get(m) == null)
-//             _memtAccCnt.put(m, new _AccCnt(0));
+//         if (_memtSet.get(m) == null)
+//             _memtSet.put(m, new _AccCnt(0));
 //         _or.Wakeup();
 //     }
 //
 //     // MemTable discarded
 //     public static void Discarded(Memtable m) {
-//         _AccCnt v = _memtAccCnt.get(m);
+//         _AccCnt v = _memtSet.get(m);
 //         if (v == null) {
 //             // Can a memtable be discarded without being accessed at all? I'm
 //             // not sure, but let's not throw an exception.

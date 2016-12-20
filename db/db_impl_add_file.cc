@@ -66,7 +66,7 @@ Status DBImpl::ReadExternalSstFileInfo(ColumnFamilyHandle* column_family,
   status = cfd->ioptions()->table_factory->NewTableReader(
       TableReaderOptions(*cfd->ioptions(), env_options_,
                          cfd->internal_comparator()),
-      std::move(sst_file_reader), file_info->file_size, &table_reader);
+      std::move(sst_file_reader), file_info->file_size, &table_reader, NULL);
   if (!status.ok()) {
     return status;
   }
