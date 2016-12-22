@@ -174,6 +174,7 @@ void TabletAccMon::_ReporterRun() {
             }
             jwriter.EndObject();
           }
+          jwriter.EndObject();
           _logger->Log(jwriter);
           _updatedSinceLastOutput = false;
         }
