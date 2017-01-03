@@ -131,7 +131,7 @@ void TabletAccMon::_ReporterRun() {
       }
 
       {
-        unique_lock<mutex> lk(_reporting_mutex);
+        lock_guard<mutex> lk(_reporting_mutex);
 
         // A 2-level check. _reporter_sleep_cv alone is not enough, since this
         // thread is woken up every second anyway.
@@ -196,7 +196,7 @@ void TabletAccMon::_ReporterWakeup() {
   // This wakes up the waiting thread even if this is called before wait.
   // _reporter_wakeupnow does the magic.
   {
-    unique_lock<mutex> lk(_reporter_sleep_mutex);
+    lock_guard<mutex> lk(_reporter_sleep_mutex);
     _reporter_wakeupnow = true;
   }
   _reporter_sleep_cv.notify_one();
@@ -209,7 +209,7 @@ void TabletAccMon::_ReportAndWait() {
   // can be called twice, which is okay - the second one won't print out
   // anything.
   {
-    unique_lock<mutex> _(_reporting_mutex);
+    lock_guard<mutex> _(_reporting_mutex);
     _reported = false;
   }
 

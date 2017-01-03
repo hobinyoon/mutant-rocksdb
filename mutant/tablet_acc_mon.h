@@ -1,8 +1,9 @@
 #pragma once
 
 #include <condition_variable>
-#include <set>
+#include <map>
 #include <mutex>
+#include <set>
 #include <thread>
 
 #include "util/event_logger.h"
@@ -13,6 +14,8 @@ namespace rocksdb {
 class MemTable;
 // Defined in table/block_based_table_reader.h
 struct BlockBasedTable;
+
+class SstMeta;
 
 class TabletAccMon {
   EventLogger* _logger = NULL;
@@ -28,6 +31,8 @@ class TabletAccMon {
   //
   // We keep only active memt and sst lists here. (Read) access countings are
   // done with a counter in each memt and sst.
+  //
+  // Note: disable MemTable monitoring when measuring the monitoring overhead.
   std::set<MemTable*> _memtSet;
   std::mutex _memtSetLock;
   std::mutex _memtSetLock2;
