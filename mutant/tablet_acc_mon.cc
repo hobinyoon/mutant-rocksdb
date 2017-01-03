@@ -101,9 +101,12 @@ void TabletAccMon::_SstClosed(BlockBasedTable* bbt) {
   if (it == _sstSet.end()) {
     THROW("Unexpected");
   } else {
-    // Report for the last time before erasing the entry
+    // Report for the last time before erasing the entry.
     _ReportAndWait();
 
+    // You need a 2-level locking with _sstSetLock and _sstSetLock2.
+    // _ReportAndWait() waits for the reporter thread to finish a cycle, which
+    // acquires _sstSetLock2. The same goes with _memtSetLock2.
     lock_guard<mutex> lk2(_sstSetLock2);
     _sstSet.erase(it);
   }
