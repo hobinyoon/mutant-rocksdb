@@ -37,11 +37,11 @@ class TabletAccMon {
   std::mutex _memtSetLock;
   std::mutex _memtSetLock2;
 
-  std::set<BlockBasedTable*> _sstSet;
-  std::mutex _sstSetLock;
-  std::mutex _sstSetLock2;
+  std::map<BlockBasedTable*, SstMeta*> _sstMap;
+  std::mutex _sstMapLock;
+  std::mutex _sstMapLock2;
 
-  std::thread _reporter;
+  std::thread _reporter_thread;
   std::mutex _reporter_sleep_mutex;
   std::condition_variable _reporter_sleep_cv;
   bool _reporter_wakeupnow = false;
@@ -49,6 +49,12 @@ class TabletAccMon {
   std::mutex _reporting_mutex;
   bool _reported = false;
   std::condition_variable _reported_cv;
+
+  // SSTable migration triggerer
+  std::thread _smt_thread;
+  std::mutex _smt_sleep_mutex;
+  std::condition_variable _smt_sleep_cv;
+  bool _smt_wakeupnow = false;
 
   static TabletAccMon& _GetInst();
 
@@ -65,6 +71,10 @@ class TabletAccMon {
   void _ReporterRun();
   void _ReporterSleep();
   void _ReporterWakeup();
+
+  void _SstMigrationTriggererRun();
+  void _SstMigrationTriggererSleep();
+  void _SstMigrationTriggererWakeup();
 
 public:
   static void Init(EventLogger* logger);
