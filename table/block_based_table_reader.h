@@ -248,7 +248,7 @@ class BlockBasedTable : public TableReader {
       THROW("Unexpected");
     _sst_id = fd->GetNumber();
 
-    TabletAccMon::SstOpened(this);
+    TabletAccMon::SstOpened(this, fd->GetFileSize());
 
     // Mutant: Figuring out which SSTable this object reads. Does this function
     // read a part of the file?

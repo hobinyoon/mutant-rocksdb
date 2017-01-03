@@ -24,6 +24,7 @@ const double TEMP_DECAY_FACTOR = 0.99;
 
 class SstMeta {
   boost::posix_time::ptime _created;
+  uint64_t _size;
   long _initial_reads = 0;
 
   double _temp = TEMP_UNINITIALIZED;
@@ -31,29 +32,30 @@ class SstMeta {
 
 public:
   // This is called by _SstOpened() with a lock held.
-  SstMeta()
+  SstMeta(uint64_t size)
   : _created(boost::posix_time::microsec_clock::local_time())
-  { }
+    , _size(size)
+  {
+    //TRACE << boost::format("size=%d\n") % _size;
+  }
 
   // These 2 are called with a lock held too. Plus, these are only called by
   // the reporter thread. Synchronization is not needed anyway.
   void UpdateTemp(long c, const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
-      double age = (t - _created).total_nanoseconds() / 1000000000.0 / _simulation_over_simulated_time_dur;
-      if (age < 30.0) {
+      double age_simulated_time = (t - _created).total_nanoseconds() / 1000000000.0 / _simulation_over_simulated_time_dur;
+      if (age_simulated_time < 30.0) {
         _initial_reads += c;
       } else {
         _initial_reads += c;
-        _temp = _initial_reads / age;
+        _temp = _initial_reads / (_size / (64 * 1024.0 * 1024.0)) / age_simulated_time;
         _last_updated = t;
       }
     } else {
       _temp = _temp * pow(TEMP_DECAY_FACTOR, (t - _last_updated).total_nanoseconds() / 1000000000.0 / _simulation_over_simulated_time_dur)
-        + c * (1 - TEMP_DECAY_FACTOR);
+        + c / (_size / (64 * 1024.0 * 1024.0)) * (1 - TEMP_DECAY_FACTOR);
       _last_updated = t;
     }
-
-    // TODO: need size. figure out where to get it. The LOG should have a hint.
   }
 
   double Temp(const boost::posix_time::ptime& t) {
@@ -132,12 +134,12 @@ void TabletAccMon::_MemtDeleted(MemTable* m) {
 }
 
 
-void TabletAccMon::_SstOpened(BlockBasedTable* bbt) {
+void TabletAccMon::_SstOpened(BlockBasedTable* bbt, uint64_t size) {
   lock_guard<mutex> lk(_sstMapLock);
 
   //TRACE << boost::format("SstOpened %d\n") % bbt->SstId();
 
-  SstMeta* sm = new SstMeta();
+  SstMeta* sm = new SstMeta(size);
 
   auto it = _sstMap.find(bbt);
   if (it == _sstMap.end()) {
@@ -369,9 +371,9 @@ void TabletAccMon::MemtDeleted(MemTable* m) {
 //
 // FileDescriptor constructor/destructor was not good ones to monitor. They
 // were copyable and the same address was opened and closed multiple times.
-void TabletAccMon::SstOpened(BlockBasedTable* bbt) {
+void TabletAccMon::SstOpened(BlockBasedTable* bbt, uint64_t size) {
   static TabletAccMon& i = _GetInst();
-  i._SstOpened(bbt);
+  i._SstOpened(bbt, size);
 }
 
 

@@ -63,7 +63,7 @@ class TabletAccMon {
   void _Init(EventLogger* logger);
   void _MemtCreated(MemTable* m);
   void _MemtDeleted(MemTable* m);
-  void _SstOpened(BlockBasedTable* bbt);
+  void _SstOpened(BlockBasedTable* bbt, uint64_t size);
   void _SstClosed(BlockBasedTable* bbt);
   void _ReportAndWait();
   void _Updated();
@@ -80,7 +80,7 @@ public:
   static void Init(EventLogger* logger);
   static void MemtCreated(MemTable* m);
   static void MemtDeleted(MemTable* m);
-  static void SstOpened(BlockBasedTable* bbt);
+  static void SstOpened(BlockBasedTable* bbt, uint64_t size);
   static void SstClosed(BlockBasedTable* bbt);
   static void ReportAndWait();
   static void Updated();

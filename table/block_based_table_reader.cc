@@ -1117,6 +1117,8 @@ InternalIterator* BlockBasedTable::NewIndexIterator(
 long BlockBasedTable::GetAndResetNumReads() {
   return _num_reads.exchange(0);
 }
+
+
 uint64_t BlockBasedTable::SstId() {
   return _sst_id;
 }
