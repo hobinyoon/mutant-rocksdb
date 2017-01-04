@@ -553,7 +553,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
   rep->internal_prefix_transform.reset(
       new InternalKeySliceTransform(rep->ioptions.prefix_extractor));
   SetupCacheKeyPrefix(rep, file_size);
-  unique_ptr<BlockBasedTable> new_table(new BlockBasedTable(rep, fd));
+  unique_ptr<BlockBasedTable> new_table(new BlockBasedTable(rep, fd, level));
 
   // page cache options
   rep->persistent_cache_options =
@@ -652,6 +652,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
     // pre-fetching of blocks is turned on
   // Will use block cache for index/filter blocks access
   // Always prefetch index and filter for level 0
+  // Mutant: TODO: cache those of cold SSTables in memory
   if (table_options.cache_index_and_filter_blocks) {
     if (prefetch_index_and_filter_in_cache || level == 0) {
       assert(table_options.block_cache != nullptr);

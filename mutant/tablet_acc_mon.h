@@ -15,7 +15,7 @@ class MemTable;
 // Defined in table/block_based_table_reader.h
 struct BlockBasedTable;
 
-class SstMeta;
+class SstTemp;
 
 class TabletAccMon {
   EventLogger* _logger = NULL;
@@ -37,7 +37,7 @@ class TabletAccMon {
   std::mutex _memtSetLock;
   std::mutex _memtSetLock2;
 
-  std::map<BlockBasedTable*, SstMeta*> _sstMap;
+  std::map<BlockBasedTable*, SstTemp*> _sstMap;
   std::mutex _sstMapLock;
   std::mutex _sstMapLock2;
 
@@ -63,7 +63,7 @@ class TabletAccMon {
   void _Init(EventLogger* logger);
   void _MemtCreated(MemTable* m);
   void _MemtDeleted(MemTable* m);
-  void _SstOpened(BlockBasedTable* bbt, uint64_t size);
+  void _SstOpened(BlockBasedTable* bbt, uint64_t size, int level);
   void _SstClosed(BlockBasedTable* bbt);
   void _ReportAndWait();
   void _Updated();
@@ -80,7 +80,7 @@ public:
   static void Init(EventLogger* logger);
   static void MemtCreated(MemTable* m);
   static void MemtDeleted(MemTable* m);
-  static void SstOpened(BlockBasedTable* bbt, uint64_t size);
+  static void SstOpened(BlockBasedTable* bbt, uint64_t size, int level);
   static void SstClosed(BlockBasedTable* bbt);
   static void ReportAndWait();
   static void Updated();

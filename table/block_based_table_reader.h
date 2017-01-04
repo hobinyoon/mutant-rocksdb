@@ -240,7 +240,7 @@ class BlockBasedTable : public TableReader {
 
   static void SetupCacheKeyPrefix(Rep* rep, uint64_t file_size);
 
-  explicit BlockBasedTable(Rep* rep, const FileDescriptor* fd)
+  explicit BlockBasedTable(Rep* rep, const FileDescriptor* fd, const int level)
       : rep_(rep), compaction_optimized_(false)
         , _num_reads(0)
   {
@@ -248,7 +248,7 @@ class BlockBasedTable : public TableReader {
       THROW("Unexpected");
     _sst_id = fd->GetNumber();
 
-    TabletAccMon::SstOpened(this, fd->GetFileSize());
+    TabletAccMon::SstOpened(this, fd->GetFileSize(), level);
 
     // Mutant: Figuring out which SSTable this object reads. Does this function
     // read a part of the file?
