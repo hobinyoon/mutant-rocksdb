@@ -76,7 +76,7 @@ public:
         _initial_reads += reads;
       } else {
         _initial_reads += reads;
-        _temp = _initial_reads / (_size / (64 * 1024.0 * 1024.0)) / age_simulated_time;
+        _temp = _initial_reads / (_size / (64.0*1024*1024)) / age_simulated_time;
 
         // Here, _temp_level is always 0 here. When _temp is cold, assume the
         // SSTable has been cold from the beginning.
@@ -100,7 +100,7 @@ public:
         / 1000000000.0 / _simulation_over_simulated_time_dur;
       // Treat reads happened in the middle of (_last_updated, t), thus the / 2.0.
       _temp = _temp * pow(TEMP_DECAY_FACTOR, dur_since_last_update_in_sec_simulated_time)
-        + reads / (_size / (64 * 1024.0 * 1024.0))
+        + reads / (_size / (64.0*1024*1024))
         * pow(TEMP_DECAY_FACTOR, dur_since_last_update_in_sec_simulated_time / 2.0)
         * (1 - TEMP_DECAY_FACTOR);
 
@@ -175,6 +175,10 @@ public:
 
   int Level() {
     return _level;
+  }
+
+  uint64_t Size() {
+    return _size;
   }
 };
 
@@ -335,13 +339,13 @@ void TabletAccMon::_ReporterRun() {
                   dur_since_last_report_simulated_time = (cur_time - prev_time).total_nanoseconds()
                     / 1000000000.0 / _simulation_over_simulated_time_dur;
                 }
-                double reads_per_sec = c / dur_since_last_report_simulated_time;
+                double reads_per_64MB_per_sec = double(c) / (st->Size() / (64.0*1024*1024)) / dur_since_last_report_simulated_time;
 
                 // Update temperature. You don't need to update st when c != 0.
                 st->UpdateTemp(c, cur_time);
 
                 sst_stat_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
-                      % bbt->SstId() % st->Level() % c % reads_per_sec % st->Temp(cur_time)));
+                      % bbt->SstId() % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
               }
             }
           }
