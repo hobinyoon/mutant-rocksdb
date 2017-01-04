@@ -69,15 +69,27 @@ public:
 
   // These 2 are called with a lock held too. Plus, these are only called by
   // the reporter thread. Synchronization is not needed anyway.
-  void UpdateTemp(long reads, const boost::posix_time::ptime& t) {
+  void UpdateTemp(long reads, double reads_per_64MB_per_sec, const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
       double age_simulated_time = (t - _created).total_nanoseconds() / 1000000000.0 / _simulation_over_simulated_time_dur;
       if (age_simulated_time < MIN_AGE_SEC_BEFORE_INIT_TEMP_SIMULATED_TIME) {
         _initial_reads += reads;
       } else {
-        _initial_reads += reads;
-        _temp = _initial_reads / (_size / (64.0*1024*1024)) / age_simulated_time;
+        // When there is a gap between the creation and the first hits, use
+        // reads_per_64MB_per_sec. RocksDB might have been busy not having time
+        // to update the stat.
+        if (_initial_reads == 0) {
+          _temp = reads_per_64MB_per_sec;
+        } else {
+          //  When there have been reads before (no gap), use the average
+          //  during the time window.
+          _initial_reads += reads;
+          _temp = _initial_reads / (_size / (64.0*1024*1024)) / age_simulated_time;
+        }
 
+        // TODO: Setting temp_level can be separated from here. It can be done
+        // in the triggerer thread.
+        //
         // Here, _temp_level is always 0 here. When _temp is cold, assume the
         // SSTable has been cold from the beginning.
         if (_temp < SST_TEMP_BECOME_COLD_THRESHOLD) {
@@ -342,7 +354,7 @@ void TabletAccMon::_ReporterRun() {
                 double reads_per_64MB_per_sec = double(c) / (st->Size() / (64.0*1024*1024)) / dur_since_last_report_simulated_time;
 
                 // Update temperature. You don't need to update st when c != 0.
-                st->UpdateTemp(c, cur_time);
+                st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
 
                 sst_stat_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
                       % bbt->SstId() % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
