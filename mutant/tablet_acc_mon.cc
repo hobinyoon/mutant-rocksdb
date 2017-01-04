@@ -24,6 +24,8 @@ const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _s
 // 22.761826, with the 60,000 sec simulation time
 
 const double TEMP_UNINITIALIZED = -1.0;
+const double MIN_AGE_SEC_BEFORE_INIT_TEMP_SIMULATED_TIME = 60.0;
+
 const double TEMP_DECAY_FACTOR = 0.99;
 
 const double SST_TEMP_BECOME_COLD_THRESHOLD = 10.0;
@@ -70,7 +72,7 @@ public:
   void UpdateTemp(long reads, const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
       double age_simulated_time = (t - _created).total_nanoseconds() / 1000000000.0 / _simulation_over_simulated_time_dur;
-      if (age_simulated_time < 30.0) {
+      if (age_simulated_time < MIN_AGE_SEC_BEFORE_INIT_TEMP_SIMULATED_TIME) {
         _initial_reads += reads;
       } else {
         _initial_reads += reads;
@@ -338,8 +340,6 @@ void TabletAccMon::_ReporterRun() {
                 // Update temperature. You don't need to update st when c != 0.
                 st->UpdateTemp(c, cur_time);
 
-                // TODO: The plotting script needs to be updated too
-                //sst_stat_str.push_back(str(boost::format("%d:%d") % bbt->SstId() % c));
                 sst_stat_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
                       % bbt->SstId() % st->Level() % c % reads_per_sec % st->Temp(cur_time)));
               }
