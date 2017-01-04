@@ -14,10 +14,10 @@ namespace rocksdb {
 
 // Note: make these configurable
 //const double _simulation_time_dur_sec =   60000.0  ;
-// For fast dev.
-//   With 6000 sec on mjolnir, about 90% idle.
-//   With 4000 secs, about 85% idle.
-//   With 2000 secs, about 55% idle. I think this is good enough.
+// For fast dev. On mjolnir, without limiting memory:
+//   With 6000 secs, about 90% CPU idle.
+//   With 4000 secs, about 85% CPU idle.
+//   With 2000 secs, about 55% CPU idle. I think this is good enough.
 const double _simulation_time_dur_sec =   2000.0  ;
 const double _simulated_time_dur_sec  = 1365709.587;
 const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _simulated_time_dur_sec;
@@ -54,8 +54,8 @@ public:
   // This is called by _SstOpened() with a lock held.
   // level is -1 for some of the SSTables.
   // - It might be because the pre-existing SSTables are opened. -1 is the
-  //   default value of one of the functions.  I wonder that means level 0. It
-  //   doesn't matter for now.
+  //   default value of one of the functions. From the temperature, it seems
+  //   like those with -1 can be at any level.  It doesn't matter for now.
   SstTemp(uint64_t sst_id, uint64_t size, int level)
   : _sst_id(sst_id)
     , _created(boost::posix_time::microsec_clock::local_time())
