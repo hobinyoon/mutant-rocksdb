@@ -14,17 +14,23 @@ namespace rocksdb {
 
 // Note: make these configurable
 //const double _simulation_time_dur_sec =   60000.0  ;
-// TODO: For fast dev
-const double _simulation_time_dur_sec =   600.0  ;
+// For fast dev.
+//   With 6000 sec on mjolnir, about 90% idle.
+//   With 4000 secs, about 85% idle.
+//   With 2000 secs, about 55% idle. I think this is good enough.
+const double _simulation_time_dur_sec =   2000.0  ;
 const double _simulated_time_dur_sec  = 1365709.587;
 const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _simulated_time_dur_sec;
-// 22.761826
+// 22.761826, with the 60,000 sec simulation time
 
 const double TEMP_UNINITIALIZED = -1.0;
 const double TEMP_DECAY_FACTOR = 0.99;
 
-const double SST_TEMP_BECOME_COLD_THRESHOLD = 20.0;
+const double SST_TEMP_BECOME_COLD_THRESHOLD = 10.0;
 const double HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC = 30.0;
+
+const long REPORT_INTERVAL_SEC_SIMULATED_TIME = 60;
+
 
 class SstTemp {
   uint64_t _sst_id;
@@ -280,8 +286,6 @@ void TabletAccMon::_Updated() {
 }
 
 
-const long REPORT_INTERVAL_SIMULATED_TIME_MS = 30000;
-
 void TabletAccMon::_ReporterRun() {
   try {
     boost::posix_time::ptime prev_time;
@@ -324,7 +328,7 @@ void TabletAccMon::_ReporterRun() {
               if (c > 0) {
                 double dur_since_last_report_simulated_time;
                 if (prev_time.is_not_a_date_time()) {
-                  dur_since_last_report_simulated_time = REPORT_INTERVAL_SIMULATED_TIME_MS / 1000.0;
+                  dur_since_last_report_simulated_time = REPORT_INTERVAL_SEC_SIMULATED_TIME;
                 } else {
                   dur_since_last_report_simulated_time = (cur_time - prev_time).total_nanoseconds()
                     / 1000000000.0 / _simulation_over_simulated_time_dur;
@@ -374,9 +378,9 @@ void TabletAccMon::_ReporterRun() {
 }
 
 
-// Sleep for REPORT_INTERVAL_SIMULATED_TIME_MS or until woken up by another thread.
+// Sleep for REPORT_INTERVAL_SEC_SIMULATED_TIME or until woken up by another thread.
 void TabletAccMon::_ReporterSleep() {
-  static const auto wait_dur = chrono::milliseconds(int(REPORT_INTERVAL_SIMULATED_TIME_MS * _simulation_over_simulated_time_dur));
+  static const auto wait_dur = chrono::milliseconds(int(REPORT_INTERVAL_SEC_SIMULATED_TIME * 1000.0 * _simulation_over_simulated_time_dur));
   //TRACE << boost::format("%d ms\n") % wait_dur.count();
   unique_lock<mutex> lk(_reporter_sleep_mutex);
   _reporter_sleep_cv.wait_for(lk, wait_dur, [&](){return _reporter_wakeupnow;});
