@@ -24,9 +24,9 @@ const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _s
 // 22.761826, with the 60,000 sec simulation time
 
 const double TEMP_UNINITIALIZED = -1.0;
-const double MIN_AGE_SEC_BEFORE_INIT_TEMP_SIMULATED_TIME = 60.0;
+const double MIN_AGE_SEC_BEFORE_INIT_TEMP_SIMULATED_TIME = 600.0;
 
-const double TEMP_DECAY_FACTOR = 0.99;
+const double TEMP_DECAY_FACTOR = 0.999;
 
 const double SST_TEMP_BECOME_COLD_THRESHOLD = 10.0;
 const double HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC = 30.0;
