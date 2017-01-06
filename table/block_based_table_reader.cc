@@ -1452,7 +1452,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
         //
         // Mutant: Update access statistics
         _num_reads ++;
-        TabletAccMon::Updated();
+        TabletAccMon::SetUpdated();
 
         BlockIter stack_biter;
         if (pin_blocks) {

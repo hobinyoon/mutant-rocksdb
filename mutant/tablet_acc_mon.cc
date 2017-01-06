@@ -18,7 +18,9 @@ namespace rocksdb {
 //   With 6000 secs, about 90% CPU idle.
 //   With 4000 secs, about 85% CPU idle.
 //   With 2000 secs, about 55% CPU idle. I think this is good enough.
-const double _simulation_time_dur_sec =   2000.0  ;
+
+// Working on multi db_paths
+const double _simulation_time_dur_sec =   1000.0  ;
 const double _simulated_time_dur_sec  = 1365709.587;
 const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _simulated_time_dur_sec;
 // 22.761826, with the 60,000 sec simulation time
@@ -28,13 +30,16 @@ const double MIN_AGE_SEC_BEFORE_INIT_TEMP_SIMULATED_TIME = 600.0;
 
 const double TEMP_DECAY_FACTOR = 0.999;
 
-const double SST_TEMP_BECOME_COLD_THRESHOLD = 10.0;
-const double HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC = 30.0;
+const double SST_TEMP_BECOME_COLD_THRESHOLD = 20.0;
+
+// Let's not make it more complicated than necessary for now
+//const double HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC = 30.0;
 
 const long REPORT_INTERVAL_SEC_SIMULATED_TIME = 60;
 
 
 class SstTemp {
+  BlockBasedTable* _bbt;
   uint64_t _sst_id;
   boost::posix_time::ptime _created;
   uint64_t _size;
@@ -44,22 +49,24 @@ class SstTemp {
   double _temp = TEMP_UNINITIALIZED;
   boost::posix_time::ptime _last_updated;
 
+  // TODO: Let's not complicate it for now
   // May want to define 4 different levels.
   // For now just 2:
   //   0: cold
   //   1: hot
-  int _temp_level = 0;
-  boost::posix_time::ptime _became_cold_at_simulation_time;
-  bool _became_cold_at_defined = false;
+  //int _temp_level = 0;
+  //boost::posix_time::ptime _became_cold_at_simulation_time;
+  //bool _became_cold_at_defined = false;
 
 public:
-  // This is called by _SstOpened() with a lock held.
+  // This is called by _SstOpened() with the locks (_sstMapLock, _sstMapLock2) held.
   // level is -1 for some of the SSTables.
   // - It might be because the pre-existing SSTables are opened. -1 is the
   //   default value of one of the functions. From the temperature, it seems
   //   like those with -1 can be at any level.  It doesn't matter for now.
-  SstTemp(uint64_t sst_id, uint64_t size, int level)
-  : _sst_id(sst_id)
+  SstTemp(BlockBasedTable* bbt, uint64_t sst_id, uint64_t size, int level)
+  : _bbt(bbt)
+    , _sst_id(sst_id)
     , _created(boost::posix_time::microsec_clock::local_time())
     , _size(size)
     , _level(level)
@@ -67,8 +74,11 @@ public:
     //TRACE << boost::format("size=%d\n") % _size;
   }
 
-  // These 2 are called with a lock held too. Plus, these are only called by
-  // the reporter thread. Synchronization is not needed anyway.
+  long GetAndResetNumReads() {
+    return _bbt->GetAndResetNumReads();
+  }
+
+  // This is called with _sstMapLock2 held.
   void UpdateTemp(long reads, double reads_per_64MB_per_sec, const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
       double age_simulated_time = (t - _created).total_nanoseconds() / 1000000000.0 / _simulation_over_simulated_time_dur;
@@ -92,18 +102,18 @@ public:
         //
         // Here, _temp_level is always 0 here. When _temp is cold, assume the
         // SSTable has been cold from the beginning.
-        if (_temp < SST_TEMP_BECOME_COLD_THRESHOLD) {
-          _became_cold_at_simulation_time = _created;
-          _became_cold_at_defined = true;
+        //if (_temp < SST_TEMP_BECOME_COLD_THRESHOLD) {
+        //  _became_cold_at_simulation_time = _created;
+        //  _became_cold_at_defined = true;
 
-          // Mark as cold
-          _temp_level = 1;
-          TRACE << boost::format("Sst %d:%d became cold at %s in simulation time\n")
-            % _sst_id % _level % _became_cold_at_simulation_time;
-          // TODO: trigger migration. either here or using a separate
-          // thread. TODO: check out the compation code and figure out how
-          // you do it.
-        }
+        //  // Mark as cold
+        //  _temp_level = 1;
+        //  TRACE << boost::format("Sst %d:%d became cold at %s in simulation time\n")
+        //    % _sst_id % _level % _became_cold_at_simulation_time;
+        //  // TODO: trigger migration. either here or using a separate
+        //  // thread. TODO: check out the compation code and figure out how
+        //  // you do it.
+        //}
 
         _last_updated = t;
       }
@@ -116,56 +126,56 @@ public:
         * pow(TEMP_DECAY_FACTOR, dur_since_last_update_in_sec_simulated_time / 2.0)
         * (1 - TEMP_DECAY_FACTOR);
 
-      if (_temp_level == 0) {
-        // Note: update to "temperature level changed". Not sure if there is any
-        // SSTable "becoming hot again".
-        //
-        // SSTable becoming colder
-        if (_temp < SST_TEMP_BECOME_COLD_THRESHOLD) {
-          if (_became_cold_at_defined) {
-            double been_cold_for = (t - _became_cold_at_simulation_time).total_nanoseconds()
-              / 1000000000.0 / _simulation_over_simulated_time_dur;
-            if (HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC < been_cold_for) {
-              // Mark as cold
-              _temp_level = 1;
-              TRACE << boost::format("Sst %d:%d became cold at %s in simulation time, been_cold_for %.2f secs in simulated time\n")
-                % _sst_id % _level % _became_cold_at_simulation_time % been_cold_for;
-              // TODO: trigger migration. either here or using a separate
-              // thread. TODO: check out the compation code and figure out how
-              // you do it.
-            }
-          } else {
-            // SST_TEMP_BECOME_COLD_THRESHOLD * pow(TEMP_DECAY_FACTOR, been_cold_for) = _temp
-            // pow(TEMP_DECAY_FACTOR, been_cold_for) = _temp / SST_TEMP_BECOME_COLD_THRESHOLD
-            // been_cold_for = log_(TEMP_DECAY_FACTOR) (_temp / SST_TEMP_BECOME_COLD_THRESHOLD)
-            //               = log(_temp / SST_TEMP_BECOME_COLD_THRESHOLD) / log(TEMP_DECAY_FACTOR)
-            double been_cold_for = log(_temp / SST_TEMP_BECOME_COLD_THRESHOLD) / log(TEMP_DECAY_FACTOR);
-            TRACE << boost::format("Sst %d:%d been_cold_for %.2f secs in simulated time\n")
-              % _sst_id % _level % been_cold_for;
-            if (dur_since_last_update_in_sec_simulated_time < been_cold_for)
-              THROW("Unexpected");
+      //if (_temp_level == 0) {
+      //  // Note: update to "temperature level changed". Not sure if there is any
+      //  // SSTable "becoming hot again".
+      //  //
+      //  // SSTable becoming colder
+      //  if (_temp < SST_TEMP_BECOME_COLD_THRESHOLD) {
+      //    if (_became_cold_at_defined) {
+      //      double been_cold_for = (t - _became_cold_at_simulation_time).total_nanoseconds()
+      //        / 1000000000.0 / _simulation_over_simulated_time_dur;
+      //      if (HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC < been_cold_for) {
+      //        // Mark as cold
+      //        _temp_level = 1;
+      //        TRACE << boost::format("Sst %d:%d became cold at %s in simulation time, been_cold_for %.2f secs in simulated time\n")
+      //          % _sst_id % _level % _became_cold_at_simulation_time % been_cold_for;
+      //        // TODO: trigger migration. either here or using a separate
+      //        // thread. TODO: check out the compation code and figure out how
+      //        // you do it.
+      //      }
+      //    } else {
+      //      // SST_TEMP_BECOME_COLD_THRESHOLD * pow(TEMP_DECAY_FACTOR, been_cold_for) = _temp
+      //      // pow(TEMP_DECAY_FACTOR, been_cold_for) = _temp / SST_TEMP_BECOME_COLD_THRESHOLD
+      //      // been_cold_for = log_(TEMP_DECAY_FACTOR) (_temp / SST_TEMP_BECOME_COLD_THRESHOLD)
+      //      //               = log(_temp / SST_TEMP_BECOME_COLD_THRESHOLD) / log(TEMP_DECAY_FACTOR)
+      //      double been_cold_for = log(_temp / SST_TEMP_BECOME_COLD_THRESHOLD) / log(TEMP_DECAY_FACTOR);
+      //      TRACE << boost::format("Sst %d:%d been_cold_for %.2f secs in simulated time\n")
+      //        % _sst_id % _level % been_cold_for;
+      //      if (dur_since_last_update_in_sec_simulated_time < been_cold_for)
+      //        THROW("Unexpected");
 
-            // Resolution independent fractional second
-            // http://www.boost.org/doc/libs/1_63_0/doc/html/date_time/posix_time.html#date_time.posix_time.time_duration
-            {
-              long cnt = boost::posix_time::time_duration::ticks_per_second()
-                * been_cold_for * _simulation_over_simulated_time_dur;
-              _became_cold_at_simulation_time = t - boost::posix_time::time_duration(0, 0, 0, cnt);
-            }
-            _became_cold_at_defined = true;
+      //      // Resolution independent fractional second
+      //      // http://www.boost.org/doc/libs/1_63_0/doc/html/date_time/posix_time.html#date_time.posix_time.time_duration
+      //      {
+      //        long cnt = boost::posix_time::time_duration::ticks_per_second()
+      //          * been_cold_for * _simulation_over_simulated_time_dur;
+      //        _became_cold_at_simulation_time = t - boost::posix_time::time_duration(0, 0, 0, cnt);
+      //      }
+      //      _became_cold_at_defined = true;
 
-            if (HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC < been_cold_for) {
-              // Mark as cold
-              _temp_level = 1;
-              TRACE << boost::format("Sst %d:%d became cold at %s in simulation time, been_cold_for %.2f secs in simulated time\n")
-                % _sst_id % _level % _became_cold_at_simulation_time % been_cold_for;
-              // TODO: trigger migration. either here or using a separate
-              // thread. TODO: check out the compation code and figure out how
-              // you do it.
-            }
-          }
-        }
-      }
+      //      if (HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC < been_cold_for) {
+      //        // Mark as cold
+      //        _temp_level = 1;
+      //        TRACE << boost::format("Sst %d:%d became cold at %s in simulation time, been_cold_for %.2f secs in simulated time\n")
+      //          % _sst_id % _level % _became_cold_at_simulation_time % been_cold_for;
+      //        // TODO: trigger migration. either here or using a separate
+      //        // thread. TODO: check out the compation code and figure out how
+      //        // you do it.
+      //      }
+      //    }
+      //  }
+      //}
 
       // TODO: SSTable "becoming hotter".  Not sure if there is any SSTable
       // that becomes hotter.  We assume the temperature changed at the time of
@@ -175,6 +185,7 @@ public:
     }
   }
 
+  // This is called with _sstMapLock2 held.
   double Temp(const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
       // TODO: Handle undefined from the caller
@@ -262,15 +273,15 @@ void TabletAccMon::_MemtDeleted(MemTable* m) {
 
 void TabletAccMon::_SstOpened(BlockBasedTable* bbt, uint64_t size, int level) {
   lock_guard<mutex> lk(_sstMapLock);
-
   //TRACE << boost::format("SstOpened %d\n") % bbt->SstId();
 
-  SstTemp* st = new SstTemp(bbt->SstId(), size, level);
+  uint64_t sst_id = bbt->SstId();
+  SstTemp* st = new SstTemp(bbt, sst_id, size, level);
 
-  auto it = _sstMap.find(bbt);
+  auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
     lock_guard<mutex> lk2(_sstMapLock2);
-    _sstMap[bbt] = st;
+    _sstMap[sst_id] = st;
   } else {
     THROW("Unexpected");
   }
@@ -279,10 +290,9 @@ void TabletAccMon::_SstOpened(BlockBasedTable* bbt, uint64_t size, int level) {
 
 void TabletAccMon::_SstClosed(BlockBasedTable* bbt) {
   lock_guard<mutex> lk(_sstMapLock);
-
-  //TRACE << boost::format("SstClosed %d\n") % bbt->SstId();
-
-  auto it = _sstMap.find(bbt);
+  uint64_t sst_id = bbt->SstId();
+  //TRACE << boost::format("SstClosed %d\n") % sst_id;
+  auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
     THROW("Unexpected");
   } else {
@@ -299,8 +309,58 @@ void TabletAccMon::_SstClosed(BlockBasedTable* bbt) {
 }
 
 
-void TabletAccMon::_Updated() {
+void TabletAccMon::_SetUpdated() {
   _updatedSinceLastOutput = true;
+}
+
+
+double TabletAccMon::_Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time) {
+  lock_guard<mutex> _(_sstMapLock2);
+  auto it = _sstMap.find(sst_id);
+  if (it == _sstMap.end())
+    THROW(boost::format("Unexpected: sst_id=%d") % sst_id);
+  SstTemp* st = it->second;
+  return st->Temp(cur_time);
+}
+
+
+uint32_t TabletAccMon::_CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata) {
+  if (file_metadata.size() == 0)
+    THROW("Unexpected");
+
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+
+  vector<double> input_sst_temp;
+  vector<double> input_sst_path_id;
+
+  for (const auto& fmd: file_metadata) {
+    uint64_t sst_id = fmd->fd.GetNumber();
+    uint32_t path_id = fmd->fd.GetPathId();
+    double temp = _Temperature(sst_id, cur_time);
+
+    if (temp != -1.0)
+      input_sst_temp.push_back(temp);
+
+    input_sst_path_id.push_back(path_id);
+
+    TRACE << boost::format("%d Input Sst: sst_id=%d path_id=%d temp=%.3f\n")
+      % std::this_thread::get_id() % sst_id % path_id % temp;
+  }
+
+  // Output path_id starts from the min of input path_ids
+  uint32_t output_path_id = *std::min_element(input_sst_path_id.begin(), input_sst_path_id.end());
+
+  // If the average input SSTable tempereture is below a threshold, set the
+  // output path_id accordingly.
+  if (input_sst_temp.size() > 0) {
+    double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size(); 
+    if (avg < SST_TEMP_BECOME_COLD_THRESHOLD) {
+      output_path_id = 1;
+    }
+  }
+  TRACE << boost::format("%d Output Sst path_id=%d\n")
+    % std::this_thread::get_id() % output_path_id;
+  return output_path_id;
 }
 
 
@@ -340,9 +400,10 @@ void TabletAccMon::_ReporterRun() {
           {
             lock_guard<mutex> lk2(_sstMapLock2);
             for (auto i: _sstMap) {
-              BlockBasedTable* bbt = i.first;
+              uint64_t sst_id = i.first;
               SstTemp* st = i.second;
-              long c = bbt->GetAndResetNumReads();
+
+              long c = st->GetAndResetNumReads();
               if (c > 0) {
                 double dur_since_last_report_simulated_time;
                 if (prev_time.is_not_a_date_time()) {
@@ -357,7 +418,7 @@ void TabletAccMon::_ReporterRun() {
                 st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
 
                 sst_stat_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
-                      % bbt->SstId() % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
+                      % sst_id % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
               }
             }
           }
@@ -528,9 +589,21 @@ void TabletAccMon::ReportAndWait() {
 }
 
 
-void TabletAccMon::Updated() {
+void TabletAccMon::SetUpdated() {
   static TabletAccMon& i = _GetInst();
-  i._Updated();
+  i._SetUpdated();
+}
+
+
+//double TabletAccMon::Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time) {
+//  static TabletAccMon& i = _GetInst();
+//  return i._Temperature(sst_id, cur_time);
+//}
+
+
+uint32_t TabletAccMon::CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata) {
+  static TabletAccMon& i = _GetInst();
+  return i._CalcOutputPathId(file_metadata);
 }
 
 }

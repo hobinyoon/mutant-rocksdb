@@ -57,6 +57,8 @@ TableBuilder* NewTableBuilder(
       column_family_id, file);
 }
 
+// Mutant: meta already has path_id set (0 from all 3 callers of this function)
+// to construct fname.
 Status BuildTable(
     const std::string& dbname, Env* env, const ImmutableCFOptions& ioptions,
     const MutableCFOptions& mutable_cf_options, const EnvOptions& env_options,
@@ -105,6 +107,7 @@ Status BuildTable(
 
       file_writer.reset(new WritableFileWriter(std::move(file), env_options));
 
+      // Mutant: this is how a table is built.
       builder = NewTableBuilder(
           ioptions, internal_comparator, int_tbl_prop_collector_factories,
           column_family_id, column_family_name, file_writer.get(), compression,

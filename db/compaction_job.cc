@@ -525,6 +525,11 @@ Status CompactionJob::Run() {
                              &compact_->sub_compact_states[i]);
   }
 
+  // Mutant: tracing where the path_id was set
+  //for (const auto& i: compact_->sub_compact_states) {
+  //  TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % i.compaction->output_path_id();
+  //}
+
   // Always schedule the first subcompaction (whether or not there are also
   // others) in the current thread to be efficient with resources
   ProcessKeyValueCompaction(&compact_->sub_compact_states[0]);
@@ -648,6 +653,9 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   assert(sub_compact != nullptr);
   std::unique_ptr<InternalIterator> input(
       versions_->MakeInputIterator(sub_compact->compaction));
+
+  // Mutant
+  //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % sub_compact->compaction->output_path_id();
 
   AutoThreadOperationStageUpdater stage_updater(
       ThreadStatus::STAGE_COMPACTION_PROCESS_KV);
@@ -1070,6 +1078,8 @@ Status CompactionJob::OpenCompactionOutputFile(
   assert(sub_compact->builder == nullptr);
   // no need to lock because VersionSet::next_file_number_ is atomic
   uint64_t file_number = versions_->NewFileNumber();
+  // Mutant: Tracing path_id
+  //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % sub_compact->compaction->output_path_id();
   std::string fname = TableFileName(db_options_.db_paths, file_number,
                                     sub_compact->compaction->output_path_id());
   // Fire events.
@@ -1113,6 +1123,8 @@ Status CompactionJob::OpenCompactionOutputFile(
   // data is going to be found
   bool skip_filters =
       cfd->ioptions()->optimize_filters_for_hits && bottommost_level_;
+
+  // Mutant: tracing how the path_id is set.
   sub_compact->builder.reset(NewTableBuilder(
       *cfd->ioptions(), cfd->internal_comparator(),
       cfd->int_tbl_prop_collector_factories(), cfd->GetID(), cfd->GetName(),

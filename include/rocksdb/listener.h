@@ -77,6 +77,8 @@ enum class CompactionReason {
   kFilesMarkedForCompaction,
 };
 
+std::ostream& operator<< (std::ostream& os, const CompactionReason& c);
+
 #ifndef ROCKSDB_LITE
 
 struct TableFileDeletionInfo {

@@ -1736,6 +1736,8 @@ Status DBImpl::WriteLevel0TableForRecovery(int job_id, ColumnFamilyData* cfd,
   FileMetaData meta;
   auto pending_outputs_inserted_elem =
       CaptureCurrentFileNumberInPendingOutputs();
+  // Mutant: A new SSTable is always stored at db_paths[0]: the second
+  // parameter is 0.
   meta.fd = FileDescriptor(versions_->NewFileNumber(), 0, 0);
   ReadOptions ro;
   ro.total_order_seek = true;
@@ -2167,6 +2169,7 @@ Status DBImpl::CompactFilesImpl(
   // following functions call is pluggable to external developers.
   version->GetColumnFamilyMetaData(&cf_meta);
 
+  // Mutant: this is one of the 2 places where path_id is set
   if (output_path_id < 0) {
     if (db_options_.db_paths.size() == 1U) {
       output_path_id = 0;
@@ -2176,6 +2179,7 @@ Status DBImpl::CompactFilesImpl(
           "yet supported in CompactFiles()");
     }
   }
+  TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % output_path_id;
 
   Status s = cfd->compaction_picker()->SanitizeCompactionInputFiles(
       &input_set, cf_meta, output_level);
@@ -3363,6 +3367,8 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       // compaction is not necessary. Need to make sure mutex is held
       // until we make a copy in the following code
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():BeforePickCompaction");
+      // Mutant: figuring out where the path_id is set
+      //TRACE << boost::format("%d\n") % std::this_thread::get_id();
       c.reset(cfd->PickCompaction(*mutable_cf_options, log_buffer));
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():AfterPickCompaction");
       if (c != nullptr) {
@@ -3390,6 +3396,11 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       }
     }
   }
+
+  //if (c != nullptr) {
+  //  // Mutant: Tracing path_id
+  //  TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % c->output_path_id();
+  //}
 
   if (c != nullptr) {
     running_compactions_.insert(c.get());
@@ -3421,6 +3432,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
                 c->num_input_files(0));
     *made_progress = true;
   } else if (!trivial_move_disallowed && c->IsTrivialMove()) {
+    // Mutant: this trivial move might be the single-SSTable move.
     TEST_SYNC_POINT("DBImpl::BackgroundCompaction:TrivialMove");
     // Instrument for event update
     // TODO(yhchiang): add op details for showing trivial-move.
@@ -3441,6 +3453,12 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       for (size_t i = 0; i < c->num_input_files(l); i++) {
         FileMetaData* f = c->input(l, i);
         c->edit()->DeleteFile(c->level(l), f->fd.GetNumber());
+        // Mutant: Tracing the path_id.
+        //
+        // Looks like it follows c->input()->fd.GetPathId(). Makes sense cause
+        // it's the trivial move.
+        TRACE << boost::format("%d sst_id=%d path_id=%d TRIVIAL MODE!\n")
+          % std::this_thread::get_id() % f->fd.GetNumber() % f->fd.GetPathId();
         c->edit()->AddFile(c->output_level(), f->fd.GetNumber(),
                            f->fd.GetPathId(), f->fd.GetFileSize(), f->smallest,
                            f->largest, f->smallest_seqno, f->largest_seqno,
@@ -3492,6 +3510,12 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
         snapshots_.GetAll(&earliest_write_conflict_snapshot);
 
     assert(is_snapshot_supported_ || snapshots_.empty());
+    // Mutant: tracing path_id
+    //
+    // This is the only path taken during a normal operation. I wonder when the
+    // other path, DBImpl::CompactFilesImpl(), is taken.  For batch repair or
+    // something?
+    //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % c->output_path_id();
     CompactionJob compaction_job(
         job_context->job_id, c.get(), db_options_, env_options_,
         versions_.get(), &shutting_down_, log_buffer, directories_.GetDbDir(),
@@ -5698,9 +5722,11 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
   }
 
   DBImpl* impl = new DBImpl(db_options, dbname);
+  //TRACE << impl->db_options_.wal_dir << "\n";
   s = impl->env_->CreateDirIfMissing(impl->db_options_.wal_dir);
   if (s.ok()) {
     for (auto db_path : impl->db_options_.db_paths) {
+      //TRACE << db_path.path << "\n";
       s = impl->env_->CreateDirIfMissing(db_path.path);
       if (!s.ok()) {
         break;

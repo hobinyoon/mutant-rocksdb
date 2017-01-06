@@ -608,7 +608,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s,
 
   // Mutant
   _num_reads ++;
-  TabletAccMon::Updated();
+  TabletAccMon::SetUpdated();
 
   // No change to value, since we have not yet found a Put/Delete
   if (!found_final_value && merge_in_progress) {

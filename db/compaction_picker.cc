@@ -26,6 +26,7 @@
 #include "util/statistics.h"
 #include "util/string_util.h"
 #include "util/sync_point.h"
+#include "mutant/tablet_acc_mon.h"
 
 namespace rocksdb {
 
@@ -1017,11 +1018,18 @@ Compaction* LevelCompactionPicker::PickCompaction(
 
   std::vector<FileMetaData*> grandparents;
   GetGrandparents(vstorage, inputs, output_level_inputs, &grandparents);
+
+  // Mutant: Calculate the output SSTable path_id.  It is based on the average
+  // input SSTable temperature.  Mutant overrides the default, storage size
+  // limit-based placement.
+  uint32_t output_path_id = TabletAccMon::CalcOutputPathId(inputs.files);
+
   auto c = new Compaction(
       vstorage, mutable_cf_options, std::move(compaction_inputs), output_level,
       mutable_cf_options.MaxFileSizeForLevel(output_level),
       mutable_cf_options.MaxGrandParentOverlapBytes(level),
-      GetPathId(ioptions_, mutable_cf_options, output_level),
+      //GetPathId(ioptions_, mutable_cf_options, output_level),
+      output_path_id,
       GetCompressionType(ioptions_, vstorage, mutable_cf_options, output_level,
                          vstorage->base_level()),
       std::move(grandparents), is_manual, score,
@@ -1068,6 +1076,7 @@ uint32_t LevelCompactionPicker::GetPathId(
     if (level_size <= current_path_size) {
       if (cur_level == level) {
         // Does desired level fit in this path?
+        //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % p;
         return p;
       } else {
         current_path_size -= level_size;
@@ -1079,6 +1088,7 @@ uint32_t LevelCompactionPicker::GetPathId(
     p++;
     current_path_size = ioptions.db_paths[p].target_size;
   }
+  //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % p;
   return p;
 }
 

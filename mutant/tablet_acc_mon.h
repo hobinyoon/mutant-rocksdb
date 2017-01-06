@@ -6,6 +6,8 @@
 #include <set>
 #include <thread>
 
+#include <boost/date_time/posix_time/posix_time.hpp>
+
 #include "util/event_logger.h"
 
 namespace rocksdb {
@@ -16,6 +18,8 @@ class MemTable;
 struct BlockBasedTable;
 
 class SstTemp;
+
+struct FileMetaData;
 
 class TabletAccMon {
   EventLogger* _logger = NULL;
@@ -37,7 +41,8 @@ class TabletAccMon {
   std::mutex _memtSetLock;
   std::mutex _memtSetLock2;
 
-  std::map<BlockBasedTable*, SstTemp*> _sstMap;
+  // map<sst_id, SstTemp*>
+  std::map<uint64_t, SstTemp*> _sstMap;
   std::mutex _sstMapLock;
   std::mutex _sstMapLock2;
 
@@ -66,7 +71,9 @@ class TabletAccMon {
   void _SstOpened(BlockBasedTable* bbt, uint64_t size, int level);
   void _SstClosed(BlockBasedTable* bbt);
   void _ReportAndWait();
-  void _Updated();
+  void _SetUpdated();
+  double _Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time);
+  uint32_t _CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata);
 
   void _ReporterRun();
   void _ReporterSleep();
@@ -83,7 +90,9 @@ public:
   static void SstOpened(BlockBasedTable* bbt, uint64_t size, int level);
   static void SstClosed(BlockBasedTable* bbt);
   static void ReportAndWait();
-  static void Updated();
+  static void SetUpdated();
+
+  static uint32_t CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata);
 };
 
 }
