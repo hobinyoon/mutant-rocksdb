@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/format.hpp>
@@ -49,6 +50,9 @@ class _Error : public std::runtime_error {
 	void _Init();
 
 public:
+  // Prevent threshing when multiple threads hit the same exception code
+  static std::mutex _mutex;
+
 	_Error(const std::string& s, const char* file_name_, const int line_no_);
 	_Error(boost::format& f, const char* file_name_, const int line_no_);
 	const char* what() const noexcept;

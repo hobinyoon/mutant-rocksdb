@@ -417,6 +417,7 @@ _Error::_Error(boost::format& f, const char* file_name_, const int line_no_)
 }
 
 void _Error::_Init() {
+  lock_guard<mutex> _(_mutex);
 	// Stack trace skips the innermost 3 functions, StackTrace(), _Init(), and
 	// _Error().
 	_what = str(boost::format("%s\n%s")
