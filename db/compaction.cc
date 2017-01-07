@@ -219,8 +219,10 @@ bool Compaction::IsTrivialMove() const {
   // Avoid a move if there is lots of overlapping grandparent data.
   // Otherwise, the move could create a parent file that will require
   // a very expensive merge later on.
+  //
   // If start_level_== output_level_, the purpose is to force compaction
   // filter to be applied to that level, and thus cannot be a trivial move.
+  // Mutant: This is probably what Mutant needs.
 
   // Check if start level have files with overlapping ranges
   if (start_level_ == 0 &&

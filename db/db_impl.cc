@@ -3367,7 +3367,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       // compaction is not necessary. Need to make sure mutex is held
       // until we make a copy in the following code
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():BeforePickCompaction");
-      // Mutant: figuring out where the path_id is set
+      // Mutant: figuring out when path_id is set
       //TRACE << boost::format("%d\n") % std::this_thread::get_id();
       c.reset(cfd->PickCompaction(*mutable_cf_options, log_buffer));
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():AfterPickCompaction");
@@ -3432,7 +3432,6 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
                 c->num_input_files(0));
     *made_progress = true;
   } else if (!trivial_move_disallowed && c->IsTrivialMove()) {
-    // Mutant: this trivial move might be the single-SSTable move.
     TEST_SYNC_POINT("DBImpl::BackgroundCompaction:TrivialMove");
     // Instrument for event update
     // TODO(yhchiang): add op details for showing trivial-move.
@@ -3453,14 +3452,18 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       for (size_t i = 0; i < c->num_input_files(l); i++) {
         FileMetaData* f = c->input(l, i);
         c->edit()->DeleteFile(c->level(l), f->fd.GetNumber());
-        // Mutant: Tracing the path_id.
+        // Looks like it follows c->input()->fd.GetPathId(). In trivial move,
+        // the input and output SSTables are at different levels.
         //
-        // Looks like it follows c->input()->fd.GetPathId(). Makes sense cause
-        // it's the trivial move.
-        TRACE << boost::format("%d sst_id=%d path_id=%d TRIVIAL MODE!\n")
+        // Mutant: Set output SSTable path_id based on the input SSTable temperature
+        uint32_t output_path_id = TabletAccMon::CalcOutputPathId(f);
+
+        TRACE << boost::format("%d sst_id=%d path_id=%d TRIVIAL MOVE! Does it happen?\n")
           % std::this_thread::get_id() % f->fd.GetNumber() % f->fd.GetPathId();
         c->edit()->AddFile(c->output_level(), f->fd.GetNumber(),
-                           f->fd.GetPathId(), f->fd.GetFileSize(), f->smallest,
+                           //f->fd.GetPathId(),
+                           output_path_id,
+                           f->fd.GetFileSize(), f->smallest,
                            f->largest, f->smallest_seqno, f->largest_seqno,
                            f->marked_for_compaction);
 

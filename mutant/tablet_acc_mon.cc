@@ -353,10 +353,32 @@ uint32_t TabletAccMon::_CalcOutputPathId(const std::vector<FileMetaData*>& file_
   // If the average input SSTable tempereture is below a threshold, set the
   // output path_id accordingly.
   if (input_sst_temp.size() > 0) {
-    double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size(); 
+    double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
     if (avg < SST_TEMP_BECOME_COLD_THRESHOLD) {
       output_path_id = 1;
     }
+  }
+  TRACE << boost::format("%d Output Sst path_id=%d\n")
+    % std::this_thread::get_id() % output_path_id;
+  return output_path_id;
+}
+
+
+uint32_t TabletAccMon::_CalcOutputPathId(const FileMetaData* fmd) {
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+
+  uint64_t sst_id = fmd->fd.GetNumber();
+  uint32_t path_id = fmd->fd.GetPathId();
+  double temp = _Temperature(sst_id, cur_time);
+
+  TRACE << boost::format("%d Input Sst: sst_id=%d path_id=%d temp=%.3f\n")
+    % std::this_thread::get_id() % sst_id % path_id % temp;
+
+  // Output path_id starts from the min of input path_ids
+  uint32_t output_path_id = path_id;
+
+  if ((temp != -1.0) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
+    output_path_id = 1;
   }
   TRACE << boost::format("%d Output Sst path_id=%d\n")
     % std::this_thread::get_id() % output_path_id;
@@ -604,6 +626,12 @@ void TabletAccMon::SetUpdated() {
 uint32_t TabletAccMon::CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata) {
   static TabletAccMon& i = _GetInst();
   return i._CalcOutputPathId(file_metadata);
+}
+
+
+uint32_t TabletAccMon::CalcOutputPathId(const FileMetaData* fmd) {
+  static TabletAccMon& i = _GetInst();
+  return i._CalcOutputPathId(fmd);
 }
 
 }

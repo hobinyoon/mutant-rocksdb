@@ -74,6 +74,7 @@ class TabletAccMon {
   void _SetUpdated();
   double _Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time);
   uint32_t _CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata);
+  uint32_t _CalcOutputPathId(const FileMetaData* fmd);
 
   void _ReporterRun();
   void _ReporterSleep();
@@ -93,6 +94,7 @@ public:
   static void SetUpdated();
 
   static uint32_t CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata);
+  static uint32_t CalcOutputPathId(const FileMetaData* fmd);
 };
 
 }
