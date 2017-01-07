@@ -977,6 +977,9 @@ Compaction* LevelCompactionPicker::PickCompaction(
   }
   if (inputs.empty()) {
     return nullptr;
+
+    // Mutant: This looks like a good place to implement temperature-based
+    // single-SSTable compaction.
   }
   assert(level >= 0 && output_level >= 0);
 

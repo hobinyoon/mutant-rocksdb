@@ -2913,6 +2913,8 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
     return;
   }
 
+  // Mutant: This is where you schedule compactions. The other place is for
+  // manual compaction.
   while (bg_compaction_scheduled_ < bg_compactions_allowed &&
          unscheduled_compactions_ > 0) {
     CompactionArg* ca = new CompactionArg;
@@ -3274,6 +3276,12 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
 Status DBImpl::BackgroundCompaction(bool* made_progress,
                                     JobContext* job_context,
                                     LogBuffer* log_buffer, void* arg) {
+  // Mutant: figuring out how this is called
+  //TRACE << "Figuring out the code path: " << Util::StackTrace(2) << "\n";
+  //
+  // rocksdb::DBImpl::BackgroundCallCompaction(void*)
+  // rocksdb::ThreadPool::BGThread(unsigned long)
+
   ManualCompaction* manual_compaction =
       reinterpret_cast<ManualCompaction*>(arg);
   *made_progress = false;
@@ -3367,7 +3375,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       // compaction is not necessary. Need to make sure mutex is held
       // until we make a copy in the following code
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():BeforePickCompaction");
-      // Mutant: figuring out when path_id is set
+      // Mutant: path_id is set inside PickCompaction()
       //TRACE << boost::format("%d\n") % std::this_thread::get_id();
       c.reset(cfd->PickCompaction(*mutable_cf_options, log_buffer));
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():AfterPickCompaction");
@@ -3513,11 +3521,9 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
         snapshots_.GetAll(&earliest_write_conflict_snapshot);
 
     assert(is_snapshot_supported_ || snapshots_.empty());
-    // Mutant: tracing path_id
-    //
-    // This is the only path taken during a normal operation. I wonder when the
-    // other path, DBImpl::CompactFilesImpl(), is taken.  For batch repair or
-    // something?
+    // Mutant: This is the only path taken during a normal operation. I wonder
+    // when the other path, DBImpl::CompactFilesImpl(), is taken.  For batch
+    // repair or something?
     //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % c->output_path_id();
     CompactionJob compaction_job(
         job_context->job_id, c.get(), db_options_, env_options_,
