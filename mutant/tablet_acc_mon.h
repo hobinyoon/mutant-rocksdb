@@ -8,21 +8,24 @@
 
 #include <boost/date_time/posix_time/posix_time.hpp>
 
-#include "util/event_logger.h"
 
 namespace rocksdb {
 
-// Defined in db/memtable.h
-class MemTable;
-// Defined in table/block_based_table_reader.h
 struct BlockBasedTable;
+class ColumnFamilyData;
+class DBImpl;
+class EventLogger;
+struct FileDescriptor;
+struct FileMetaData;
+class MemTable;
+class TableReader;
 
 class SstTemp;
 
-struct FileMetaData;
-
 class TabletAccMon {
-  EventLogger* _logger = NULL;
+  DBImpl* _db = nullptr;
+  EventLogger* _logger = nullptr;
+  ColumnFamilyData* _cfd = nullptr;
 
   // We don't use an expensive atomic operation here. It's about when to
   // report, and it's okay we are not super accurate about the timing. This is
@@ -65,16 +68,23 @@ class TabletAccMon {
 
   TabletAccMon();
 
-  void _Init(EventLogger* logger);
-  void _MemtCreated(MemTable* m);
+  void _Init(DBImpl* db, EventLogger* el);
+  void _MemtCreated(ColumnFamilyData* cfd, MemTable* m);
   void _MemtDeleted(MemTable* m);
-  void _SstOpened(BlockBasedTable* bbt, uint64_t size, int level);
+  void _SstOpened(TableReader* tr, const FileDescriptor* fd, int level);
+  // TODO: I don't like this. Doesn't feel like a clean interface. Once it's
+  // working, rewrite it. Call SstOpened() at 3 separate places.
+  void _SstSetLevel(uint64_t sst_id, int level);
   void _SstClosed(BlockBasedTable* bbt);
   void _ReportAndWait();
   void _SetUpdated();
   double _Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time);
-  uint32_t _CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata);
+  uint32_t _CalcOutputPathId(
+      bool temperature_triggered_single_sstable_compaction,
+      const std::vector<FileMetaData*>& file_metadata,
+      std::vector<std::string>& input_sst_info);
   uint32_t _CalcOutputPathId(const FileMetaData* fmd);
+  FileMetaData*_PickSstForMigration(int& level_for_migration);
 
   void _ReporterRun();
   void _ReporterSleep();
@@ -85,16 +95,22 @@ class TabletAccMon {
   void _SstMigrationTriggererWakeup();
 
 public:
-  static void Init(EventLogger* logger);
-  static void MemtCreated(MemTable* m);
+  static void Init(DBImpl* db, EventLogger* el);
+  static void MemtCreated(ColumnFamilyData* cfd, MemTable* m);
   static void MemtDeleted(MemTable* m);
-  static void SstOpened(BlockBasedTable* bbt, uint64_t size, int level);
+  static void SstOpened(TableReader* tr, const FileDescriptor* fd, int level);
+  static void SstSetLevel(uint64_t sst_id, int level);
   static void SstClosed(BlockBasedTable* bbt);
   static void ReportAndWait();
   static void SetUpdated();
 
-  static uint32_t CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata);
+  static uint32_t CalcOutputPathId(
+      bool temperature_triggered_single_sstable_compaction,
+      const std::vector<FileMetaData*>& file_metadata,
+      std::vector<std::string>& input_sst_info);
   static uint32_t CalcOutputPathId(const FileMetaData* fmd);
+
+  static FileMetaData* PickSstForMigration(int& level_for_migration);
 };
 
 }

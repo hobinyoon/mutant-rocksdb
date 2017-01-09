@@ -2915,6 +2915,9 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
 
   // Mutant: This is where you schedule compactions. The other place is for
   // manual compaction.
+  //TRACE << boost::format("%d bg_compaction_scheduled_=%d bg_compactions_allowed=%d unscheduled_compactions_=%d\n")
+  //  % std::this_thread::get_id()
+  //  % bg_compaction_scheduled_ % bg_compactions_allowed % unscheduled_compactions_;
   while (bg_compaction_scheduled_ < bg_compactions_allowed &&
          unscheduled_compactions_ > 0) {
     CompactionArg* ca = new CompactionArg;
@@ -2922,10 +2925,34 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
     ca->m = nullptr;
     bg_compaction_scheduled_++;
     unscheduled_compactions_--;
+    //TRACE << boost::format("%d\n") % std::this_thread::get_id();
     env_->Schedule(&DBImpl::BGWorkCompaction, ca, Env::Priority::LOW, this,
                    &DBImpl::UnscheduleCallback);
   }
 }
+
+// Mutant: schedule a compaction.
+//
+// Mutant's temperature-based compaction (migration) is scheduled when there is
+// no regular leveled compaction is scheduled.  Didn't use ManualCompaction,
+// which seems to take priority over background compactions.
+void DBImpl::MutantScheduleCompaction(ColumnFamilyData* cfd) {
+  InstrumentedMutexLock l(&mutex_);
+
+  AddToCompactionQueue(cfd);
+  ++unscheduled_compactions_;
+  MaybeScheduleFlushOrCompaction();
+}
+
+
+// Mutant: TODO: rewrite the code
+// GetMetadataForFile() has a nested loop. Doesn't seem so efficient.
+Status DBImpl::MutantGetMetadataForFile(uint64_t number, int* filelevel,
+    FileMetaData** meta, ColumnFamilyData** cfd) {
+  //TRACE << boost::format("%d\n") % std::this_thread::get_id();
+  return versions_->GetMetadataForFile(number, filelevel, meta, cfd);
+}
+
 
 void DBImpl::SchedulePurge() {
   mutex_.AssertHeld();
@@ -3273,6 +3300,8 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
   }
 }
 
+
+// Mutant: Compaction triggerer triggers this function every so often.
 Status DBImpl::BackgroundCompaction(bool* made_progress,
                                     JobContext* job_context,
                                     LogBuffer* log_buffer, void* arg) {
@@ -3281,6 +3310,8 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
   //
   // rocksdb::DBImpl::BackgroundCallCompaction(void*)
   // rocksdb::ThreadPool::BGThread(unsigned long)
+  //
+  //TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   ManualCompaction* manual_compaction =
       reinterpret_cast<ManualCompaction*>(arg);
@@ -3464,10 +3495,10 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
         // the input and output SSTables are at different levels.
         //
         // Mutant: Set output SSTable path_id based on the input SSTable temperature
+        TRACE << boost::format("%d sst_id=%d path_id=%d Trivial move. Does it ever happen?\n")
+          % std::this_thread::get_id() % f->fd.GetNumber() % f->fd.GetPathId();
         uint32_t output_path_id = TabletAccMon::CalcOutputPathId(f);
 
-        TRACE << boost::format("%d sst_id=%d path_id=%d TRIVIAL MOVE! Does it happen?\n")
-          % std::this_thread::get_id() % f->fd.GetNumber() % f->fd.GetPathId();
         c->edit()->AddFile(c->output_level(), f->fd.GetNumber(),
                            //f->fd.GetPathId(),
                            output_path_id,
@@ -5854,7 +5885,7 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
     impl->MaybeScheduleFlushOrCompaction();
 
     // Assume TabletAccMon is used by a single DB instance
-    TabletAccMon::Init(&(impl->event_logger_));
+    TabletAccMon::Init(impl, &(impl->event_logger_));
   }
   impl->mutex_.Unlock();
 

@@ -54,7 +54,8 @@ MemTableOptions::MemTableOptions(const ImmutableCFOptions& ioptions,
       merge_operator(ioptions.merge_operator),
       info_log(ioptions.info_log) {}
 
-MemTable::MemTable(const InternalKeyComparator& cmp,
+MemTable::MemTable(ColumnFamilyData* cfd,
+                   const InternalKeyComparator& cmp,
                    const ImmutableCFOptions& ioptions,
                    const MutableCFOptions& mutable_cf_options,
                    WriteBufferManager* write_buffer_manager,
@@ -99,7 +100,7 @@ MemTable::MemTable(const InternalKeyComparator& cmp,
 
   // Mutant. We use the address for the memtable ID. I don't see anything else
   // that can be used.
-  TabletAccMon::MemtCreated(this);
+  TabletAccMon::MemtCreated(cfd, this);
 }
 
 MemTable::~MemTable() {

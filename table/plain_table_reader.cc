@@ -488,6 +488,12 @@ Status PlainTableReader::GetOffset(PlainTableKeyDecoder* decoder,
   return Status::OK();
 }
 
+
+long PlainTableReader::GetAndResetNumReads() {
+  THROW("Not implemented");
+}
+
+
 bool PlainTableReader::MatchBloom(uint32_t hash) const {
   // Mutant: TODO: This path is not taken. Hmm.
   TRACE << "\n";

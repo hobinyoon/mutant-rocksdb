@@ -971,6 +971,10 @@ Status CompactionJob::FinishCompactionOutputFile(
         nullptr, cfd->internal_stats()->GetFileReadHist(
                      compact_->compaction->output_level()),
         false);
+    // Mutant: Here compact_->compaction->output_level() always have a level.
+    //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % compact_->compaction->output_level();
+    TabletAccMon::SstSetLevel(meta->fd.GetNumber(), compact_->compaction->output_level());
+
     s = iter->status();
 
     if (s.ok() && paranoid_file_checks_) {

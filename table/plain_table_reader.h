@@ -109,6 +109,9 @@ class PlainTableReader: public TableReader {
                    const TableProperties* table_properties);
   virtual ~PlainTableReader();
 
+  // Mutant
+  long GetAndResetNumReads();
+
  protected:
   // Check bloom filter to see whether it might contain this prefix.
   // The hash of the prefix is given, since it can be reused for index lookup

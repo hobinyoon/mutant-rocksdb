@@ -503,6 +503,11 @@ class DBImpl : public DB {
 
   Status NewDB();
 
+  // Mutant
+  void MutantScheduleCompaction(ColumnFamilyData* cfd);
+  Status MutantGetMetadataForFile(uint64_t number, int* filelevel,
+      FileMetaData** meta, ColumnFamilyData** cfd);
+
  protected:
   Env* const env_;
   const std::string dbname_;

@@ -58,6 +58,9 @@ class CuckooTableReader: public TableReader {
   void SetupForCompaction() override {}
   // End of methods not implemented.
 
+  // Mutant
+  long GetAndResetNumReads();
+
  private:
   friend class CuckooTableIterator;
   void LoadAllKeys(std::vector<std::pair<Slice, uint32_t>>* key_to_bucket_id);

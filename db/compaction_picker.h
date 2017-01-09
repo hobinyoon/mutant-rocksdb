@@ -212,7 +212,8 @@ class LevelCompactionPicker : public CompactionPicker {
   void PickFilesMarkedForCompactionExperimental(const std::string& cf_name,
                                                 VersionStorageInfo* vstorage,
                                                 CompactionInputFiles* inputs,
-                                                int* level, int* output_level);
+                                                int* level, int* output_level,
+                                                bool& temperature_triggered_single_sstable_compaction);
 };
 
 #ifndef ROCKSDB_LITE

@@ -2,10 +2,12 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/format.hpp>
 
+#include "db/db_impl.h"
 #include "db/event_helpers.h"
 #include "db/version_edit.h"
 #include "mutant/tablet_acc_mon.h"
 #include "table/block_based_table_reader.h"
+#include "util/event_logger.h"
 #include "util/util.h"
 
 using namespace std;
@@ -19,8 +21,9 @@ namespace rocksdb {
 //   With 4000 secs, about 85% CPU idle.
 //   With 2000 secs, about 55% CPU idle. I think this is good enough.
 
-// Working on multi db_paths
-const double _simulation_time_dur_sec =   1000.0  ;
+// Working on multi db_paths. Let's go a bit faster.
+const double _simulation_time_dur_sec =   1500.0  ;
+
 const double _simulated_time_dur_sec  = 1365709.587;
 const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _simulated_time_dur_sec;
 // 22.761826, with the 60,000 sec simulation time
@@ -37,19 +40,30 @@ const double SST_TEMP_BECOME_COLD_THRESHOLD = 20.0;
 
 const long REPORT_INTERVAL_SEC_SIMULATED_TIME = 60;
 
+//const long TEMP_UPDATE_INTERVAL_SIMULATED_TIME_SEC = 60;
+// TODO: For dev.
+const long TEMP_UPDATE_INTERVAL_SIMULATED_TIME_SEC = 1200;
+
 
 class SstTemp {
-  BlockBasedTable* _bbt;
-  uint64_t _sst_id;
+  TableReader* _tr;
   boost::posix_time::ptime _created;
-  uint64_t _size;
+
+  // TODO: update
+  // _level can be -1, right after the construction, when a SSTable is made by
+  // a result of compaction. The time window is very small. When -1, don't use
+  // it.
   int _level;
+
+  uint64_t _sst_id;
+  uint64_t _size;
+  uint32_t _path_id;
   long _initial_reads = 0;
 
   double _temp = TEMP_UNINITIALIZED;
   boost::posix_time::ptime _last_updated;
 
-  // TODO: Let's not complicate it for now
+  // Let's not complicate it for now.
   // May want to define 4 different levels.
   // For now just 2:
   //   0: cold
@@ -60,41 +74,50 @@ class SstTemp {
 
 public:
   // This is called by _SstOpened() with the locks (_sstMapLock, _sstMapLock2) held.
-  // level is -1 for some of the SSTables.
-  // - It might be because the pre-existing SSTables are opened. -1 is the
-  //   default value of one of the functions. From the temperature, it seems
-  //   like those with -1 can be at any level.  It doesn't matter for now.
-  SstTemp(BlockBasedTable* bbt, uint64_t sst_id, uint64_t size, int level)
-  : _bbt(bbt)
-    , _sst_id(sst_id)
+  // level is -1 for some of the SSTables that are created from compaction.
+  SstTemp(TableReader* tr, const FileDescriptor* fd, int level)
+  : _tr(tr)
     , _created(boost::posix_time::microsec_clock::local_time())
-    , _size(size)
     , _level(level)
   {
-    //TRACE << boost::format("size=%d\n") % _size;
+    _sst_id = fd->GetNumber();
+
+    // Keep a copy of _size here. fd seems to change over the life of a SstTemp.
+    // The same goes with the other members from fd.
+    _size = fd->GetFileSize();
+    if (_size == 0)
+      THROW("Unexpected");
+
+    _path_id = fd->GetPathId();
   }
 
   long GetAndResetNumReads() {
-    return _bbt->GetAndResetNumReads();
+    return _tr->GetAndResetNumReads();
   }
 
   // This is called with _sstMapLock2 held.
   void UpdateTemp(long reads, double reads_per_64MB_per_sec, const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
+      // Let's make it simple. It's good for a super young SSTable to have a
+      // high temperature, so that when it's compacted with other SSTables
+      // the output SSTables don't go to higher-level storage devices.
+      _temp = reads_per_64MB_per_sec;
+
+#if 0
       double age_simulated_time = (t - _created).total_nanoseconds() / 1000000000.0 / _simulation_over_simulated_time_dur;
       if (age_simulated_time < MIN_AGE_SEC_BEFORE_INIT_TEMP_SIMULATED_TIME) {
         _initial_reads += reads;
       } else {
         // When there is a gap between the creation and the first hits, use
-        // reads_per_64MB_per_sec. RocksDB might have been busy not having time
-        // to update the stat.
+        // reads_per_64MB_per_sec. RocksDB might have been busy not having
+        // enough time to update the stat.
         if (_initial_reads == 0) {
           _temp = reads_per_64MB_per_sec;
         } else {
           //  When there have been reads before (no gap), use the average
           //  during the time window.
           _initial_reads += reads;
-          _temp = _initial_reads / (_size / (64.0*1024*1024)) / age_simulated_time;
+          _temp = _initial_reads / (_size/(64.0*1024*1024)) / age_simulated_time;
         }
 
         // TODO: Setting temp_level can be separated from here. It can be done
@@ -109,77 +132,26 @@ public:
         //  // Mark as cold
         //  _temp_level = 1;
         //  TRACE << boost::format("Sst %d:%d became cold at %s in simulation time\n")
-        //    % _sst_id % _level % _became_cold_at_simulation_time;
+        //    % _fd->GetNumber() % _level % _became_cold_at_simulation_time;
         //  // TODO: trigger migration. either here or using a separate
         //  // thread. TODO: check out the compation code and figure out how
         //  // you do it.
         //}
-
-        _last_updated = t;
       }
+#endif
+      _last_updated = t;
     } else {
       double dur_since_last_update_in_sec_simulated_time = (t - _last_updated).total_nanoseconds()
         / 1000000000.0 / _simulation_over_simulated_time_dur;
-      // Treat reads happened in the middle of (_last_updated, t), thus the / 2.0.
+      // Assume the reads, thus the temperature change, happen in the middle of
+      // (_last_updated, t), thus the / 2.0.
       _temp = _temp * pow(TEMP_DECAY_FACTOR, dur_since_last_update_in_sec_simulated_time)
-        + reads / (_size / (64.0*1024*1024))
+        + reads / (_size/(64.0*1024*1024))
         * pow(TEMP_DECAY_FACTOR, dur_since_last_update_in_sec_simulated_time / 2.0)
         * (1 - TEMP_DECAY_FACTOR);
 
-      //if (_temp_level == 0) {
-      //  // Note: update to "temperature level changed". Not sure if there is any
-      //  // SSTable "becoming hot again".
-      //  //
-      //  // SSTable becoming colder
-      //  if (_temp < SST_TEMP_BECOME_COLD_THRESHOLD) {
-      //    if (_became_cold_at_defined) {
-      //      double been_cold_for = (t - _became_cold_at_simulation_time).total_nanoseconds()
-      //        / 1000000000.0 / _simulation_over_simulated_time_dur;
-      //      if (HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC < been_cold_for) {
-      //        // Mark as cold
-      //        _temp_level = 1;
-      //        TRACE << boost::format("Sst %d:%d became cold at %s in simulation time, been_cold_for %.2f secs in simulated time\n")
-      //          % _sst_id % _level % _became_cold_at_simulation_time % been_cold_for;
-      //        // TODO: trigger migration. either here or using a separate
-      //        // thread. TODO: check out the compation code and figure out how
-      //        // you do it.
-      //      }
-      //    } else {
-      //      // SST_TEMP_BECOME_COLD_THRESHOLD * pow(TEMP_DECAY_FACTOR, been_cold_for) = _temp
-      //      // pow(TEMP_DECAY_FACTOR, been_cold_for) = _temp / SST_TEMP_BECOME_COLD_THRESHOLD
-      //      // been_cold_for = log_(TEMP_DECAY_FACTOR) (_temp / SST_TEMP_BECOME_COLD_THRESHOLD)
-      //      //               = log(_temp / SST_TEMP_BECOME_COLD_THRESHOLD) / log(TEMP_DECAY_FACTOR)
-      //      double been_cold_for = log(_temp / SST_TEMP_BECOME_COLD_THRESHOLD) / log(TEMP_DECAY_FACTOR);
-      //      TRACE << boost::format("Sst %d:%d been_cold_for %.2f secs in simulated time\n")
-      //        % _sst_id % _level % been_cold_for;
-      //      if (dur_since_last_update_in_sec_simulated_time < been_cold_for)
-      //        THROW("Unexpected");
-
-      //      // Resolution independent fractional second
-      //      // http://www.boost.org/doc/libs/1_63_0/doc/html/date_time/posix_time.html#date_time.posix_time.time_duration
-      //      {
-      //        long cnt = boost::posix_time::time_duration::ticks_per_second()
-      //          * been_cold_for * _simulation_over_simulated_time_dur;
-      //        _became_cold_at_simulation_time = t - boost::posix_time::time_duration(0, 0, 0, cnt);
-      //      }
-      //      _became_cold_at_defined = true;
-
-      //      if (HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC < been_cold_for) {
-      //        // Mark as cold
-      //        _temp_level = 1;
-      //        TRACE << boost::format("Sst %d:%d became cold at %s in simulation time, been_cold_for %.2f secs in simulated time\n")
-      //          % _sst_id % _level % _became_cold_at_simulation_time % been_cold_for;
-      //        // TODO: trigger migration. either here or using a separate
-      //        // thread. TODO: check out the compation code and figure out how
-      //        // you do it.
-      //      }
-      //    }
-      //  }
-      //}
-
-      // TODO: SSTable "becoming hotter".  Not sure if there is any SSTable
-      // that becomes hotter.  We assume the temperature changed at the time of
-      // this function call.
+      // Not sure if there is any SSTable that becomes "hotter" natually.
+      // QuizUp trace doesn't. Synthetic ones may.
 
       _last_updated = t;
     }
@@ -188,7 +160,6 @@ public:
   // This is called with _sstMapLock2 held.
   double Temp(const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
-      // TODO: Handle undefined from the caller
       return _temp;
     } else {
       return _temp * pow(TEMP_DECAY_FACTOR, (t - _last_updated).total_nanoseconds()
@@ -196,12 +167,21 @@ public:
     }
   }
 
+  void SetLevel(int level) {
+    _level = level;
+  }
+
+  // Note that the level is unreliable here. You get a lot of -1s.
   int Level() {
     return _level;
   }
 
   uint64_t Size() {
     return _size;
+  }
+
+  uint32_t PathId() {
+    return _path_id;
   }
 };
 
@@ -224,8 +204,9 @@ TabletAccMon::TabletAccMon()
 }
 
 
-void TabletAccMon::_Init(EventLogger* logger) {
-  _logger = logger;
+void TabletAccMon::_Init(DBImpl* db, EventLogger* el) {
+  _db = db;
+  _logger = el;
   //TRACE << "TabletAccMon initialized\n";
 
   JSONWriter jwriter;
@@ -236,8 +217,15 @@ void TabletAccMon::_Init(EventLogger* logger) {
 }
 
 
-void TabletAccMon::_MemtCreated(MemTable* m) {
+void TabletAccMon::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
   lock_guard<mutex> lk(_memtSetLock);
+
+  if (_cfd == nullptr) {
+    _cfd = cfd;
+  } else {
+    if (_cfd != cfd)
+      THROW("Unexpected");
+  }
 
   //TRACE << boost::format("MemtCreated %p\n") % m;
 
@@ -271,12 +259,13 @@ void TabletAccMon::_MemtDeleted(MemTable* m) {
 }
 
 
-void TabletAccMon::_SstOpened(BlockBasedTable* bbt, uint64_t size, int level) {
+void TabletAccMon::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
   lock_guard<mutex> lk(_sstMapLock);
-  //TRACE << boost::format("SstOpened %d\n") % bbt->SstId();
 
-  uint64_t sst_id = bbt->SstId();
-  SstTemp* st = new SstTemp(bbt, sst_id, size, level);
+  uint64_t sst_id = fd->GetNumber();
+  SstTemp* st = new SstTemp(tr, fd, level);
+
+  //TRACE << boost::format("SstOpened sst_id=%d\n") % sst_id;
 
   auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
@@ -288,13 +277,24 @@ void TabletAccMon::_SstOpened(BlockBasedTable* bbt, uint64_t size, int level) {
 }
 
 
+void TabletAccMon::_SstSetLevel(uint64_t sst_id, int level) {
+  auto it = _sstMap.find(sst_id);
+  if (it == _sstMap.end())
+    THROW("Unexpected");
+
+  lock_guard<mutex> _(_sstMapLock2);
+  _sstMap[sst_id]->SetLevel(level);
+}
+
+
 void TabletAccMon::_SstClosed(BlockBasedTable* bbt) {
   lock_guard<mutex> lk(_sstMapLock);
   uint64_t sst_id = bbt->SstId();
   //TRACE << boost::format("SstClosed %d\n") % sst_id;
   auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
-    THROW("Unexpected");
+    TRACE << boost::format("Hmm... Sst %d closed without having been opened\n") % sst_id;
+    //THROW("Unexpected");
   } else {
     // Report for the last time before erasing the entry.
     _ReportAndWait();
@@ -324,7 +324,10 @@ double TabletAccMon::_Temperature(uint64_t sst_id, const boost::posix_time::ptim
 }
 
 
-uint32_t TabletAccMon::_CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata) {
+uint32_t TabletAccMon::_CalcOutputPathId(
+    bool temperature_triggered_single_sstable_compaction,
+    const std::vector<FileMetaData*>& file_metadata,
+    vector<string>& input_sst_info) {
   if (file_metadata.size() == 0)
     THROW("Unexpected");
 
@@ -343,8 +346,18 @@ uint32_t TabletAccMon::_CalcOutputPathId(const std::vector<FileMetaData*>& file_
 
     input_sst_path_id.push_back(path_id);
 
-    TRACE << boost::format("%d Input Sst: sst_id=%d path_id=%d temp=%.3f\n")
-      % std::this_thread::get_id() % sst_id % path_id % temp;
+    int level;
+    {
+      lock_guard<mutex> lk2(_sstMapLock2);
+      auto it = _sstMap.find(sst_id);
+      if (it == _sstMap.end())
+        THROW("Unexpected");
+      SstTemp* st = it->second;
+      level = st->Level();
+    }
+
+    input_sst_info.push_back(str(boost::format("(sst_id=%d level=%d path_id=%d temp=%.3f)")
+          % sst_id % level % path_id % temp));
   }
 
   // Output path_id starts from the min of input path_ids
@@ -358,8 +371,21 @@ uint32_t TabletAccMon::_CalcOutputPathId(const std::vector<FileMetaData*>& file_
       output_path_id = 1;
     }
   }
-  TRACE << boost::format("%d Output Sst path_id=%d\n")
-    % std::this_thread::get_id() % output_path_id;
+
+  {
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_tablet_compaction";
+    jwriter.StartObject();
+    jwriter << "temp_triggered_single_sst_compaction" << temperature_triggered_single_sstable_compaction;
+    if (input_sst_info.size() > 0)
+      jwriter << "in_sst" << boost::algorithm::join(input_sst_info, " ");
+    jwriter << "out_sst_path_id" << output_path_id;
+    jwriter.EndObject();
+    jwriter.EndObject();
+    _logger->Log(jwriter);
+  }
+
   return output_path_id;
 }
 
@@ -374,7 +400,6 @@ uint32_t TabletAccMon::_CalcOutputPathId(const FileMetaData* fmd) {
   TRACE << boost::format("%d Input Sst: sst_id=%d path_id=%d temp=%.3f\n")
     % std::this_thread::get_id() % sst_id % path_id % temp;
 
-  // Output path_id starts from the min of input path_ids
   uint32_t output_path_id = path_id;
 
   if ((temp != -1.0) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
@@ -383,6 +408,64 @@ uint32_t TabletAccMon::_CalcOutputPathId(const FileMetaData* fmd) {
   TRACE << boost::format("%d Output Sst path_id=%d\n")
     % std::this_thread::get_id() % output_path_id;
   return output_path_id;
+}
+
+
+FileMetaData* TabletAccMon::_PickSstForMigration(int& level_for_migration) {
+  double temp_min = -1.0;
+  // nullptr is for no SSTable suitable for migration
+  FileMetaData* fmd_with_temp_min = nullptr;
+
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+
+  lock_guard<mutex> _(_sstMapLock2);
+  for (auto i: _sstMap) {
+    uint64_t sst_id = i.first;
+    SstTemp* st = i.second;
+    int level = i.second->Level();
+    // We don't consider level -1 and 0.
+    if (level <= 0)
+      continue;
+
+    // TODO: Revisit this for multi-level path_ids. 2-level for now.
+    if (st->PathId() > 0)
+      continue;
+
+    if (!_db)
+      return fmd_with_temp_min;
+
+    int filelevel;
+    FileMetaData* fmd;
+    ColumnFamilyData* cfd;
+    Status s = _db->MutantGetMetadataForFile(sst_id, &filelevel, &fmd, &cfd);
+    if (s.code() == Status::kNotFound) {
+      // This happens every so often. Skip.
+      continue;
+    } else {
+      if (!s.ok())
+        THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
+    }
+
+    if (fmd->being_compacted)
+      continue;
+
+    double temp = st->Temp(cur_time);
+    if ((temp != TEMP_UNINITIALIZED) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
+      if (fmd_with_temp_min == nullptr) {
+        temp_min = temp;
+        fmd_with_temp_min = fmd;
+        level_for_migration = level;
+      } else {
+        if (temp < temp_min) {
+          temp_min = temp;
+          fmd_with_temp_min = fmd;
+          level_for_migration = level;
+        }
+      }
+    }
+  }
+
+  return fmd_with_temp_min;
 }
 
 
@@ -439,6 +522,8 @@ void TabletAccMon::_ReporterRun() {
                 // Update temperature. You don't need to update st when c != 0.
                 st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
 
+                // Note that the level might be unreliable here. Although the
+                // chance is really low.
                 sst_stat_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
                       % sst_id % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
               }
@@ -523,11 +608,12 @@ void TabletAccMon::_ReportAndWait() {
 // temperature of a SSTable drops below a threshold (*configurable*) and stays
 // for 30 seconds (*configurable*).
 void TabletAccMon::_SstMigrationTriggererRun() {
-  return;
-
   try {
     while (true) {
       _SstMigrationTriggererSleep();
+
+      if (_cfd)
+        _db->MutantScheduleCompaction(_cfd);
 
       {
         //lock_guard<mutex> lk(_smt_mutex);
@@ -540,8 +626,6 @@ void TabletAccMon::_SstMigrationTriggererRun() {
         // TODO: Calc the temperature and when it drops below a threshold, e.g.
         // 1.0 (num reads with decay)/64MB/sec, mark the SSTable as cold, so
         // that the compaction manager can migrate it to a cold storage device.
-
-        // TODO: THROW("Trigger migration");
       }
     }
   } catch (const exception& e) {
@@ -553,8 +637,7 @@ void TabletAccMon::_SstMigrationTriggererRun() {
 void TabletAccMon::_SstMigrationTriggererSleep() {
   // Update every 1 minute in simulated time.
   // Note: Optionize later.
-  static const long temp_update_interval_simulated_time_ms = 60000;
-  static const long temp_update_interval_ms = temp_update_interval_simulated_time_ms * _simulation_over_simulated_time_dur;
+  static const long temp_update_interval_ms = TEMP_UPDATE_INTERVAL_SIMULATED_TIME_SEC * 1000.0 * _simulation_over_simulated_time_dur;
   static const auto wait_dur = chrono::milliseconds(temp_update_interval_ms);
   unique_lock<mutex> lk(_smt_sleep_mutex);
   _smt_sleep_cv.wait_for(lk, wait_dur, [&](){return _smt_wakeupnow;});
@@ -562,24 +645,52 @@ void TabletAccMon::_SstMigrationTriggererSleep() {
 }
 
 
-void TabletAccMon::_SstMigrationTriggererWakeup() {
-  {
-    lock_guard<mutex> lk(_smt_sleep_mutex);
-    _smt_wakeupnow = true;
+// Not used for now
+//void TabletAccMon::_SstMigrationTriggererWakeup() {
+//  {
+//    lock_guard<mutex> lk(_smt_sleep_mutex);
+//    _smt_wakeupnow = true;
+//  }
+//  _smt_sleep_cv.notify_one();
+//}
+
+
+void TabletAccMon::Init(DBImpl* db, EventLogger* el) {
+  static TabletAccMon& i = _GetInst();
+  i._Init(db, el);
+}
+
+
+void TabletAccMon::MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
+  // This is called more often than SstOpened() at least in the beginning of
+  // the experiment. I think it won't be less often even when the DB restarts.
+  //
+  //TRACE << boost::format("%d cfd=%p cfd_name=%s\n") % std::this_thread::get_id() % cfd % cfd->GetName();
+
+  if (cfd->GetName() != "default") {
+    // Are there any CF other than the user-provided, "default"? If not,
+    // monitoring becomes a bit easier.  Cassandra has system CF.
+    TRACE << boost::format("%d Interesting! cfd=%p cfd_name=%s\n")
+      % std::this_thread::get_id() % cfd % cfd->GetName();
+    return;
   }
-  _smt_sleep_cv.notify_one();
-}
 
+  // TRACE << Util::StackTrace(1) << "\n";
+  //
+  // rocksdb::MemTable::MemTable(rocksdb::InternalKeyComparator const&, rocksdb::ImmutableCFOptions const&, rocksdb::MutableCFOptions const&, rocksdb::WriteBufferManager*, unsigned long)
+  // rocksdb::ColumnFamilyData::ConstructNewMemtable(rocksdb::MutableCFOptions const&, unsigned long)
+  //   You can get ColumnFamilyData* here
+  //
+  // rocksdb::DBImpl::SwitchMemtable(rocksdb::ColumnFamilyData*, rocksdb::DBImpl::WriteContext*)
+  // rocksdb::DBImpl::ScheduleFlushes(rocksdb::DBImpl::WriteContext*)
+  // rocksdb::DBImpl::WriteImpl(rocksdb::WriteOptions const&, rocksdb::WriteBatch*, rocksdb::WriteCallback*, unsigned long*, unsigned long, bool)
+  // rocksdb::DBImpl::Write(rocksdb::WriteOptions const&, rocksdb::WriteBatch*)
+  // rocksdb::DB::Put(rocksdb::WriteOptions const&, rocksdb::ColumnFamilyHandle*, rocksdb::Slice const&, rocksdb::Slice const&)
+  // rocksdb::DBImpl::Put(rocksdb::WriteOptions const&, rocksdb::ColumnFamilyHandle*, rocksdb::Slice const&, rocksdb::Slice const&)
+  // rocksdb::DB::Put(rocksdb::WriteOptions const&, rocksdb::Slice const&, rocksdb::Slice const&)
 
-void TabletAccMon::Init(EventLogger* logger) {
   static TabletAccMon& i = _GetInst();
-  i._Init(logger);
-}
-
-
-void TabletAccMon::MemtCreated(MemTable* m) {
-  static TabletAccMon& i = _GetInst();
-  i._MemtCreated(m);
+  i._MemtCreated(cfd, m);
 }
 
 
@@ -593,9 +704,35 @@ void TabletAccMon::MemtDeleted(MemTable* m) {
 //
 // FileDescriptor constructor/destructor was not good ones to monitor. They
 // were copyable and the same address was opened and closed multiple times.
-void TabletAccMon::SstOpened(BlockBasedTable* bbt, uint64_t size, int level) {
+//
+// It is called when a SSTable is opened, created from flush and created from
+// compaction.  See the comment in BlockBasedTable::BlockBasedTable().
+void TabletAccMon::SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
+  // TRACE << Util::StackTrace(1) << "\n";
+  //
+  // rocksdb::TabletAccMon::SstOpened(rocksdb::BlockBasedTable*, rocksdb::FileDescriptor const*, int)
+  // rocksdb::BlockBasedTable::Open(rocksdb::ImmutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::BlockBasedTableOptions const&, rocksdb::InternalKeyComparator const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool, bool, int)
+  // rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool) const
+  // rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, bool, int, bool)
+  // rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, rocksdb::Cache::Handle**, bool, bool, rocksdb::HistogramImpl*, bool, int, bool)
+  // rocksdb::TableCache::NewIterator(rocksdb::ReadOptions const&, rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, rocksdb::TableReader**, rocksdb::HistogramImpl*, bool, rocksdb::Arena*, bool, int)
+  // rocksdb::CompactionJob::FinishCompactionOutputFile(rocksdb::Status const&, rocksdb::CompactionJob::SubcompactionState*)
+  //   You can get ColumnFamilyData* in FinishCompactionOutputFile()
+  //
+  // rocksdb::CompactionJob::ProcessKeyValueCompaction(rocksdb::CompactionJob::SubcompactionState*)
+  // rocksdb::CompactionJob::Run()
+  // rocksdb::DBImpl::BackgroundCompaction(bool*, rocksdb::JobContext*, rocksdb::LogBuffer*, void*)
+  // rocksdb::DBImpl::BackgroundCallCompaction(void*)
+  // rocksdb::ThreadPool::BGThread(unsigned long)
+
   static TabletAccMon& i = _GetInst();
-  i._SstOpened(bbt, size, level);
+  i._SstOpened(tr, fd, level);
+}
+
+
+void TabletAccMon::SstSetLevel(uint64_t sst_id, int level) {
+  static TabletAccMon& i = _GetInst();
+  i._SstSetLevel(sst_id, level);
 }
 
 
@@ -623,15 +760,24 @@ void TabletAccMon::SetUpdated() {
 //}
 
 
-uint32_t TabletAccMon::CalcOutputPathId(const std::vector<FileMetaData*>& file_metadata) {
+uint32_t TabletAccMon::CalcOutputPathId(
+    bool temperature_triggered_single_sstable_compaction,
+    const std::vector<FileMetaData*>& file_metadata,
+    vector<string>& input_sst_info) {
   static TabletAccMon& i = _GetInst();
-  return i._CalcOutputPathId(file_metadata);
+  return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata, input_sst_info);
 }
 
 
 uint32_t TabletAccMon::CalcOutputPathId(const FileMetaData* fmd) {
   static TabletAccMon& i = _GetInst();
   return i._CalcOutputPathId(fmd);
+}
+
+
+FileMetaData* TabletAccMon::PickSstForMigration(int& level_for_migration) {
+  static TabletAccMon& i = _GetInst();
+  return i._PickSstForMigration(level_for_migration);
 }
 
 }

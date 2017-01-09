@@ -1403,6 +1403,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
 
 Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
                             GetContext* get_context,
+                            // Mutant: TODO: clean up fd. not used.
                             const FileDescriptor* fd,
                             bool skip_filters) {
   //TRACE << boost::format("skip_filters=%d\n") % skip_filters;

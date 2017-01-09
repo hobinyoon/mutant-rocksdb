@@ -91,6 +91,9 @@ Status BuildTable(
 #endif  // !ROCKSDB_LITE
   TableProperties tp;
 
+  // Mutant
+  //TRACE << boost::format("%d dbname=%s\n") % std::this_thread::get_id() % dbname;
+
   if (iter->Valid()) {
     TableBuilder* builder;
     unique_ptr<WritableFileWriter> file_writer;

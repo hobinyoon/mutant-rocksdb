@@ -97,6 +97,9 @@ class TableReader {
   }
 
   virtual void Close() {}
+
+  // Mutant
+  virtual long GetAndResetNumReads() = 0;
 };
 
 }  // namespace rocksdb

@@ -385,5 +385,9 @@ InternalIterator* CuckooTableReader::NewIterator(
 
 size_t CuckooTableReader::ApproximateMemoryUsage() const { return 0; }
 
+long CuckooTableReader::GetAndResetNumReads() {
+  THROW("Not implemented");
+}
+
 }  // namespace rocksdb
 #endif

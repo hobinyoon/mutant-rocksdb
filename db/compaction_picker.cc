@@ -875,8 +875,32 @@ bool LevelCompactionPicker::NeedsCompaction(
 
 void LevelCompactionPicker::PickFilesMarkedForCompactionExperimental(
     const std::string& cf_name, VersionStorageInfo* vstorage,
-    CompactionInputFiles* inputs, int* level, int* output_level) {
+    CompactionInputFiles* inputs, int* level, int* output_level,
+    bool& temperature_triggered_single_sstable_compaction) {
+  temperature_triggered_single_sstable_compaction = false;
   if (vstorage->FilesMarkedForCompaction().empty()) {
+    // Mutant: when there is nothing left for compaction, do a
+    // temperature-triggered compaction (migration).  Pick the coldest one that
+    // are under the temperature threshold.
+    //
+    // In PickSstForMigration(), we use MutantGetMetadataForFile() to get
+    // FileMetaData*.  Tried vstorage->files_ to get FileMetaData*, but it
+    // doesn't have a recent snapshot, and didn't want to messup with its
+    // versioning by calling SaveTo().
+    int level_for_migration = -1;
+    FileMetaData* fmd = TabletAccMon::PickSstForMigration(level_for_migration);
+    if (fmd == nullptr) {
+      // No SSTable suitable for migration
+      return;
+    }
+
+    inputs->files = {fmd};
+    inputs->level = level_for_migration;
+    *level = level_for_migration;
+    *output_level = level_for_migration;
+    temperature_triggered_single_sstable_compaction = true;
+    //TRACE << boost::format("%d Mutant: temperature-triggered SSTable compaction (migration)\n") %
+    //  std::this_thread::get_id();
     return;
   }
 
@@ -966,20 +990,26 @@ Compaction* LevelCompactionPicker::PickCompaction(
   bool is_manual = false;
   // if we didn't find a compaction, check if there are any files marked for
   // compaction
+
+  //TRACE << boost::format("%d Mutant: inputs.size()=%d\n")
+  //  % std::this_thread::get_id() % inputs.size();
+  bool temperature_triggered_single_sstable_compaction = false;
+
   if (inputs.empty()) {
     is_manual = true;
     parent_index = base_index = -1;
+
+    // Mutant: When there is nothing to compact, we do a temperature-triggered
+    // single-SSTable compaction (migration).
     PickFilesMarkedForCompactionExperimental(cf_name, vstorage, &inputs, &level,
-                                             &output_level);
+                                             &output_level,
+                                             temperature_triggered_single_sstable_compaction);
     if (!inputs.empty()) {
       compaction_reason = CompactionReason::kFilesMarkedForCompaction;
     }
   }
   if (inputs.empty()) {
     return nullptr;
-
-    // Mutant: This looks like a good place to implement temperature-based
-    // single-SSTable compaction.
   }
   assert(level >= 0 && output_level >= 0);
 
@@ -1023,9 +1053,17 @@ Compaction* LevelCompactionPicker::PickCompaction(
   GetGrandparents(vstorage, inputs, output_level_inputs, &grandparents);
 
   // Mutant: Calculate the output SSTable path_id.  It is based on the average
-  // input SSTable temperature.  Mutant overrides the default, storage size
-  // limit-based placement.
-  uint32_t output_path_id = TabletAccMon::CalcOutputPathId(inputs.files);
+  // input SSTable temperature.  Mutant overrides the RocksDB default, storage
+  // size limit-based placement.
+
+  std::vector<std::string> input_sst_info;
+  uint32_t output_path_id = TabletAccMon::CalcOutputPathId(
+      temperature_triggered_single_sstable_compaction,
+      inputs.files, input_sst_info);
+
+  // Mutant: I don't like the format of this
+  // LogToBuffer(log_buffer, "[%s] Mutant AAA\n", cf_name.c_str());
+  // 2017/01/08-23:05:48.070539 7fd970f45700 (Original Log Time 2017/01/08-23:05:48.070517) [default] Mutant AAA
 
   auto c = new Compaction(
       vstorage, mutable_cf_options, std::move(compaction_inputs), output_level,

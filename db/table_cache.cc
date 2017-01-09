@@ -13,6 +13,7 @@
 #include "db/filename.h"
 #include "db/version_edit.h"
 
+#include "mutant/tablet_acc_mon.h"
 #include "rocksdb/statistics.h"
 #include "table/internal_iterator.h"
 #include "table/iterator_wrapper.h"
@@ -162,11 +163,49 @@ Status TableCache::FindTable(const EnvOptions& env_options,
       s = cache_->Insert(key, table_reader.get(), 1, &DeleteEntry<TableReader>,
                          handle);
       if (s.ok()) {
+        // Mutant: Limit this to the "default" CF. Do you need to? RocksDB
+        // seems to store only user SSTables. Then, no.
+        //
+        // Some of them have level -1. It is set in
+        // FinishCompactionOutputFile() after this function is done.
+        //
+        // Mutant: TODO: Change the interface so you don't have to worry about the time window.
+        TabletAccMon::SstOpened(table_reader.get(), &fd, level);
+
+        if (false && level == -1) {
+          TRACE << Util::StackTrace(1) << "\n";
+
+          // rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&,
+          //   rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor
+          //   const&, rocksdb::Cache::Handle **, bool, bool,
+          //   rocksdb::HistogramImpl*, bool, int, bool)
+          // rocksdb::TableCache::NewIterator(rocksdb::ReadOptions const&,
+          //   rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&,
+          //   rocksdb::FileDescriptor const&, rocksdb::TableReader**,
+          //   rocksdb::HistogramImpl*, bool, rocksdb::Arena*, bool, int)
+          // rocksdb::CompactionJob::FinishCompactionOutputFile(rocksdb::Status const&, rocksdb::CompactionJob::SubcompactionState*)
+          //
+          // - TODO: You need FileMetaData for TabletAccMon to be able to check
+          // if a file is being_compacted. Revisit the calling function of that
+          // to make sure you really need to cache it!
+          //
+          // rocksdb::CompactionJob::ProcessKeyValueCompaction(rocksdb::CompactionJob::SubcompactionState*)
+          // rocksdb::CompactionJob::Run()
+          // rocksdb::DBImpl::BackgroundCompaction(bool*, rocksdb::JobContext*, rocksdb::LogBuffer*, void*)
+          // rocksdb::DBImpl::BackgroundCallCompaction(void*)
+          // rocksdb::ThreadPool::BGThread(unsigned long)
+        }
+
         // Release ownership of table reader.
         table_reader.release();
       }
     }
   }
+
+  // Mutant: I don't think you need to trace this. When the cache lookup
+  // succeeds, it should be already in the cache. The above is the only place
+  // that cache_->Insert() is used.
+
   return s;
 }
 

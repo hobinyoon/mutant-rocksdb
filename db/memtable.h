@@ -29,6 +29,7 @@
 
 namespace rocksdb {
 
+class ColumnFamilyData;
 class Mutex;
 class MemTableIterator;
 class MergeContext;
@@ -96,7 +97,8 @@ class MemTable {
   // If the earliest sequence number is not known, kMaxSequenceNumber may be
   // used, but this may prevent some transactions from succeeding until the
   // first key is inserted into the memtable.
-  explicit MemTable(const InternalKeyComparator& comparator,
+  explicit MemTable(ColumnFamilyData* cfd,
+                    const InternalKeyComparator& comparator,
                     const ImmutableCFOptions& ioptions,
                     const MutableCFOptions& mutable_cf_options,
                     WriteBufferManager* write_buffer_manager,
