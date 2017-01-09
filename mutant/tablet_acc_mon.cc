@@ -49,10 +49,8 @@ class SstTemp {
   TableReader* _tr;
   boost::posix_time::ptime _created;
 
-  // TODO: update
-  // _level can be -1, right after the construction, when a SSTable is made by
-  // a result of compaction. The time window is very small. When -1, don't use
-  // it.
+  // _level is always set. It used to be -1 sometimes, but not any more after
+  // updating the code in CompactionJob::FinishCompactionOutputFile().
   int _level;
 
   uint64_t _sst_id;
@@ -74,7 +72,6 @@ class SstTemp {
 
 public:
   // This is called by _SstOpened() with the locks (_sstMapLock, _sstMapLock2) held.
-  // level is -1 for some of the SSTables that are created from compaction.
   SstTemp(TableReader* tr, const FileDescriptor* fd, int level)
   : _tr(tr)
     , _created(boost::posix_time::microsec_clock::local_time())
@@ -167,11 +164,6 @@ public:
     }
   }
 
-  void SetLevel(int level) {
-    _level = level;
-  }
-
-  // Note that the level is unreliable here. You get a lot of -1s.
   int Level() {
     return _level;
   }
@@ -274,16 +266,6 @@ void TabletAccMon::_SstOpened(TableReader* tr, const FileDescriptor* fd, int lev
   } else {
     THROW("Unexpected");
   }
-}
-
-
-void TabletAccMon::_SstSetLevel(uint64_t sst_id, int level) {
-  auto it = _sstMap.find(sst_id);
-  if (it == _sstMap.end())
-    THROW("Unexpected");
-
-  lock_guard<mutex> _(_sstMapLock2);
-  _sstMap[sst_id]->SetLevel(level);
 }
 
 
@@ -423,7 +405,7 @@ FileMetaData* TabletAccMon::_PickSstForMigration(int& level_for_migration) {
     uint64_t sst_id = i.first;
     SstTemp* st = i.second;
     int level = i.second->Level();
-    // We don't consider level -1 and 0.
+    // We don't consider level -1 (there used to be, not anymore) and 0.
     if (level <= 0)
       continue;
 
@@ -522,8 +504,6 @@ void TabletAccMon::_ReporterRun() {
                 // Update temperature. You don't need to update st when c != 0.
                 st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
 
-                // Note that the level might be unreliable here. Although the
-                // chance is really low.
                 sst_stat_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
                       % sst_id % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
               }
@@ -730,12 +710,6 @@ void TabletAccMon::SstOpened(TableReader* tr, const FileDescriptor* fd, int leve
 }
 
 
-void TabletAccMon::SstSetLevel(uint64_t sst_id, int level) {
-  static TabletAccMon& i = _GetInst();
-  i._SstSetLevel(sst_id, level);
-}
-
-
 void TabletAccMon::SstClosed(BlockBasedTable* bbt) {
   static TabletAccMon& i = _GetInst();
   i._SstClosed(bbt);
@@ -752,12 +726,6 @@ void TabletAccMon::SetUpdated() {
   static TabletAccMon& i = _GetInst();
   i._SetUpdated();
 }
-
-
-//double TabletAccMon::Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time) {
-//  static TabletAccMon& i = _GetInst();
-//  return i._Temperature(sst_id, cur_time);
-//}
 
 
 uint32_t TabletAccMon::CalcOutputPathId(

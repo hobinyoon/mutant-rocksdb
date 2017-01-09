@@ -966,14 +966,27 @@ Status CompactionJob::FinishCompactionOutputFile(
   TableProperties tp;
   if (s.ok() && current_entries > 0) {
     // Verify that the table is usable
+
+    //InternalIterator* iter = cfd->table_cache()->NewIterator(
+    //    ReadOptions(), env_options_, cfd->internal_comparator(), meta->fd,
+    //    nullptr, cfd->internal_stats()->GetFileReadHist(compact_->compaction->output_level()), false);
+    //
+    // Mutant: the last parameter, level, can be set, instead of leaving to the
+    // default -1 (unknown). Seems to be working fine.
+    //
     InternalIterator* iter = cfd->table_cache()->NewIterator(
         ReadOptions(), env_options_, cfd->internal_comparator(), meta->fd,
-        nullptr, cfd->internal_stats()->GetFileReadHist(
-                     compact_->compaction->output_level()),
-        false);
-    // Mutant: Here compact_->compaction->output_level() always have a level.
+        nullptr, cfd->internal_stats()->GetFileReadHist(compact_->compaction->output_level()),
+        false,                               // bool for_compaction
+        nullptr,                             // Arena* arena = nullptr
+        false,                               // bool skip_filters = false
+        compact_->compaction->output_level() // int level = -1
+        );
+    // Mutant: Used to set the level using a separate function, but didn't want
+    // to introduce a time gap between SstOpened() and SstSetLevel() where
+    // level = -1.
     //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % compact_->compaction->output_level();
-    TabletAccMon::SstSetLevel(meta->fd.GetNumber(), compact_->compaction->output_level());
+    //TabletAccMon::SstSetLevel(meta->fd.GetNumber(), compact_->compaction->output_level());
 
     s = iter->status();
 

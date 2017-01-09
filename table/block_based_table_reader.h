@@ -254,25 +254,51 @@ class BlockBasedTable : public TableReader {
     // TRACE << Util::StackTrace(1) << "\n";
     //
     // Flush path
-    //   rocksdb::BlockBasedTable::Open(rocksdb::ImmutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::BlockBasedTableOptions const&, rocksdb::InternalKeyComparator const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool, bool, int)
-    //   rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete <rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescr iptor const*, bool) const
-    //   rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, bool, int, bool)
-    //   rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, rocksdb::Cache::Handle **, bool, bool, rocksdb::HistogramImpl*, bool, int, bool)
-    //   rocksdb::TableCache::NewIterator(rocksdb::ReadOptions const&, rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, rocksdb::TableReader**, rocksdb::HistogramImpl*, bool, rocksdb::Arena*, bool, int)
-    //   rocksdb::BuildTable(std::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, rocksdb::Env*, rocksdb::ImmutableCFOptions const&, rocksdb::MutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::TableCache*, rocksdb::InternalIterator*, rocksdb::FileMetaData*, rocksdb::InternalKeyComparator const&, std::vector<std::unique_ptr<rocksdb::IntTblPropCollectorFactory, std::default_delete<rocksdb::IntTblPropCollectorFactory> >, std::allocator <std::unique_ptr<rocksdb::IntTblPropCollectorFactory, std::default_delete<rocksdb::IntTblPropCollectorFactory> > > > const*, unsigned int, std::basic_string <char, std::char_traits<char>, std::allocator<char> > const&, std::vector<unsigned long, std::allocator<unsigned long> >, unsigned long, rocksdb::Compressio nType, rocksdb::CompressionOptions const&, bool, rocksdb::InternalStats*, rocksdb::TableFileCreationReason, rocksdb::EventLogger*, int, rocksdb::Env::IOPrio rity, rocksdb::TableProperties*, int)
+    //   rocksdb::BlockBasedTable::Open(rocksdb::ImmutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::BlockBasedTableOptions const&,
+    //     rocksdb::InternalKeyComparator const&, std::unique_ptr<rocksdb::RandomAccessFileReader,
+    //     std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long,
+    //     std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool, bool, int)
+    //   rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader,
+    //     std::default_delete <rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader,
+    //     std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescr iptor const*, bool) const
+    //   rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&,
+    //     bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*,
+    //     bool, int, bool)
+    //   rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&,
+    //     rocksdb::Cache::Handle **, bool, bool, rocksdb::HistogramImpl*, bool, int, bool)
+    //   rocksdb::TableCache::NewIterator(rocksdb::ReadOptions const&, rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&,
+    //     rocksdb::FileDescriptor const&, rocksdb::TableReader**, rocksdb::HistogramImpl*, bool, rocksdb::Arena*, bool, int)
+    //   rocksdb::BuildTable(std::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, rocksdb::Env*,
+    //     rocksdb::ImmutableCFOptions const&, rocksdb::MutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::TableCache*,
+    //     rocksdb::InternalIterator*, rocksdb::FileMetaData*, rocksdb::InternalKeyComparator const&,
+    //     std::vector<std::unique_ptr<rocksdb::IntTblPropCollectorFactory, std::default_delete<rocksdb::IntTblPropCollectorFactory> >,
+    //     std::allocator <std::unique_ptr<rocksdb::IntTblPropCollectorFactory, std::default_delete<rocksdb::IntTblPropCollectorFactory> > > > const*,
+    //     unsigned int, std::basic_string <char, std::char_traits<char>, std::allocator<char> > const&, std::vector<unsigned long,
+    //     std::allocator<unsigned long> >, unsigned long, rocksdb::CompressionType, rocksdb::CompressionOptions const&, bool, rocksdb::InternalStats*,
+    //     rocksdb::TableFileCreationReason, rocksdb::EventLogger*, int, rocksdb::Env::IOPriority, rocksdb::TableProperties*, int)
     //   rocksdb::FlushJob::WriteLevel0Table()
     //   rocksdb::FlushJob::Run(rocksdb::FileMetaData*)
-    //   rocksdb::DBImpl::FlushMemTableToOutputFile(rocksdb::ColumnFamilyData*, rocksdb::MutableCFOptions const&, bool*, rocksdb::JobContext*, rocksdb::LogBuffer*)
+    //   rocksdb::DBImpl::FlushMemTableToOutputFile(rocksdb::ColumnFamilyData*, rocksdb::MutableCFOptions const&, bool*, rocksdb::JobContext*,
+    //     rocksdb::LogBuffer*)
     //   rocksdb::DBImpl::BackgroundFlush(bool*, rocksdb::JobContext*, rocksdb::LogBuffer*)
     //   rocksdb::DBImpl::BackgroundCallFlush()
     //   rocksdb::ThreadPool::BGThread(unsigned long)
     //
     // Compaction path
-    //   rocksdb::BlockBasedTable::Open(rocksdb::ImmutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::BlockBasedTableOptions const&, rocksdb::InternalKeyComparator const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool, bool, int)
-    //   rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete <rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescr iptor const*, bool) const
-    //   rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, bool, int, bool)
-    //   rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, rocksdb::Cache::Handle **, bool, bool, rocksdb::HistogramImpl*, bool, int, bool)
-    //   rocksdb::TableCache::NewIterator(rocksdb::ReadOptions const&, rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, rocksdb::TableReader**, rocksdb::HistogramImpl*, bool, rocksdb::Arena*, bool, int)
+    //   rocksdb::BlockBasedTable::Open(rocksdb::ImmutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::BlockBasedTableOptions const&,
+    //     rocksdb::InternalKeyComparator const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&,
+    //     unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*,
+    //     bool, bool, int)
+    //   rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader,
+    //     std::default_delete <rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader,
+    //     std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool) const
+    //   rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&,
+    //     bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader,
+    //     std::default_delete<rocksdb::TableReader> >*, bool, int, bool)
+    //   rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&,
+    //     rocksdb::Cache::Handle **, bool, bool, rocksdb::HistogramImpl*, bool, int, bool)
+    //   rocksdb::TableCache::NewIterator(rocksdb::ReadOptions const&, rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&,
+    //     rocksdb::FileDescriptor const&, rocksdb::TableReader**, rocksdb::HistogramImpl*, bool, rocksdb::Arena*, bool, int)
     //   rocksdb::CompactionJob::FinishCompactionOutputFile(rocksdb::Status const&, rocksdb::CompactionJob::SubcompactionState*)
     //   rocksdb::CompactionJob::ProcessKeyValueCompaction(rocksdb::CompactionJob::SubcompactionState*)
     //   rocksdb::CompactionJob::Run()
@@ -281,11 +307,20 @@ class BlockBasedTable : public TableReader {
     //   rocksdb::ThreadPool::BGThread(unsigned long)
     //
     // Loading an existing SSTable
-    //   rocksdb::BlockBasedTable::Open(rocksdb::ImmutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::BlockBasedTableOptions const&, rocksdb::InternalKeyComparator const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool, bool, int)
-    //   rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool) const
-    //   rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, bool, int, bool)
-    //   rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, rocksdb::Cache::Handle **, bool, bool, rocksdb::HistogramImpl*, bool, int, bool)
-    //   std::_Function_handler<void (), rocksdb::VersionBuilder::Rep::LoadTableHandlers(rocksdb::InternalStats*, int, bool)::{lambda()#1}>::_M_invoke(std::_Any_data const&)
+    //   rocksdb::BlockBasedTable::Open(rocksdb::ImmutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::BlockBasedTableOptions const&,
+    //     rocksdb::InternalKeyComparator const&, std::unique_ptr<rocksdb::RandomAccessFileReader,
+    //     std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader,
+    //     std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool, bool, int)
+    //   rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader,
+    //     std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader,
+    //     std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool) const
+    //   rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&,
+    //     bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader,
+    //     std::default_delete<rocksdb::TableReader> >*, bool, int, bool)
+    //   rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&,
+    //     rocksdb::Cache::Handle **, bool, bool, rocksdb::HistogramImpl*, bool, int, bool)
+    //   std::_Function_handler<void (), rocksdb::VersionBuilder::Rep::LoadTableHandlers(rocksdb::InternalStats*,
+    //     int, bool)::{lambda()#1}>::_M_invoke(std::_Any_data const&)
   }
 
   // Generate a cache key prefix from the file

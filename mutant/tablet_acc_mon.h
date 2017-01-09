@@ -72,9 +72,6 @@ class TabletAccMon {
   void _MemtCreated(ColumnFamilyData* cfd, MemTable* m);
   void _MemtDeleted(MemTable* m);
   void _SstOpened(TableReader* tr, const FileDescriptor* fd, int level);
-  // TODO: I don't like this. Doesn't feel like a clean interface. Once it's
-  // working, rewrite it. Call SstOpened() at 3 separate places.
-  void _SstSetLevel(uint64_t sst_id, int level);
   void _SstClosed(BlockBasedTable* bbt);
   void _ReportAndWait();
   void _SetUpdated();
@@ -99,7 +96,6 @@ public:
   static void MemtCreated(ColumnFamilyData* cfd, MemTable* m);
   static void MemtDeleted(MemTable* m);
   static void SstOpened(TableReader* tr, const FileDescriptor* fd, int level);
-  static void SstSetLevel(uint64_t sst_id, int level);
   static void SstClosed(BlockBasedTable* bbt);
   static void ReportAndWait();
   static void SetUpdated();
