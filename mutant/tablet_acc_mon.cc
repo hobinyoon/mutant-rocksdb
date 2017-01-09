@@ -29,20 +29,10 @@ const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _s
 // 22.761826, with the 60,000 sec simulation time
 
 const double TEMP_UNINITIALIZED = -1.0;
-const double MIN_AGE_SEC_BEFORE_INIT_TEMP_SIMULATED_TIME = 600.0;
-
 const double TEMP_DECAY_FACTOR = 0.999;
-
 const double SST_TEMP_BECOME_COLD_THRESHOLD = 20.0;
-
-// Let's not make it more complicated than necessary for now
-//const double HAS_BEEN_COLD_FOR_THRESHOLD_IN_SEC = 30.0;
-
 const long REPORT_INTERVAL_SEC_SIMULATED_TIME = 60;
-
-//const long TEMP_UPDATE_INTERVAL_SIMULATED_TIME_SEC = 60;
-// TODO: For dev.
-const long TEMP_UPDATE_INTERVAL_SIMULATED_TIME_SEC = 1200;
+const long SST_MIGRATION_TRIGGERER_INTERVAL_SIMULATED_TIME_SEC = 60;
 
 
 class SstTemp {
@@ -419,9 +409,10 @@ FileMetaData* TabletAccMon::_PickSstForMigration(int& level_for_migration) {
     int filelevel;
     FileMetaData* fmd;
     ColumnFamilyData* cfd;
+    // TODO: Not very efficient. GetMetadataForFile() has a nested loop.
     Status s = _db->MutantGetMetadataForFile(sst_id, &filelevel, &fmd, &cfd);
     if (s.code() == Status::kNotFound) {
-      // This happens every so often. Skip.
+      // This rarely happens, but happens. Ignore the sst.
       continue;
     } else {
       if (!s.ok())
@@ -544,7 +535,7 @@ void TabletAccMon::_ReporterRun() {
 
 // Sleep for REPORT_INTERVAL_SEC_SIMULATED_TIME or until woken up by another thread.
 void TabletAccMon::_ReporterSleep() {
-  static const auto wait_dur = chrono::milliseconds(int(REPORT_INTERVAL_SEC_SIMULATED_TIME * 1000.0 * _simulation_over_simulated_time_dur));
+  static const auto wait_dur = chrono::milliseconds(long(REPORT_INTERVAL_SEC_SIMULATED_TIME * 1000.0 * _simulation_over_simulated_time_dur));
   //TRACE << boost::format("%d ms\n") % wait_dur.count();
   unique_lock<mutex> lk(_reporter_sleep_mutex);
   _reporter_sleep_cv.wait_for(lk, wait_dur, [&](){return _reporter_wakeupnow;});
@@ -584,29 +575,52 @@ void TabletAccMon::_ReportAndWait() {
 }
 
 
-// This thread triggers a SSTable compaction, which migrates SSTables, when the
-// temperature of a SSTable drops below a threshold (*configurable*) and stays
-// for 30 seconds (*configurable*).
+// This thread schedules a background SSTable compaction when there may be a
+// cold SSTable.
+//
+// When you schedule a background compaction and there is no compaction to do,
+// you get "Compaction nothing to do".
 void TabletAccMon::_SstMigrationTriggererRun() {
   try {
     while (true) {
       _SstMigrationTriggererSleep();
 
-      if (_cfd)
-        _db->MutantScheduleCompaction(_cfd);
+      if (!_cfd)
+        continue;
 
+      if (_db->UnscheduledCompactions() > 0)
+        continue;
+
+      // Schedule only when there is a cold SSTable to avoid scheduling too
+      // many compactions that end up doing nothing.
+      //
+      // A simpler, is-there-any-cold-SSTable check. The full check is done
+      // later in _PickSstForMigration().
+      bool cold_sstable_may_exist = false;
+      boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
       {
-        //lock_guard<mutex> lk(_smt_mutex);
+        lock_guard<mutex> _(_sstMapLock2);
+        for (auto i: _sstMap) {
+          SstTemp* st = i.second;
+          int level = i.second->Level();
+          // We don't consider level -1 (there used to be, not anymore) and 0.
+          if (level <= 0)
+            continue;
 
-        // TODO: Check if any SSTable has been cold
-        // TODO: and trigger migration
-        //static const long has_been_cold_for_threshold_simulated_time_ms = 30000;
-        //static const long has_been_cold_for_threshold_ms = has_been_cold_for_threshold_simulated_time_ms * _simulation_over_simulated_time_dur;
+          // TODO: Revisit this for multi-level path_ids. 2-level for now.
+          if (st->PathId() > 0)
+            continue;
 
-        // TODO: Calc the temperature and when it drops below a threshold, e.g.
-        // 1.0 (num reads with decay)/64MB/sec, mark the SSTable as cold, so
-        // that the compaction manager can migrate it to a cold storage device.
+          double temp = st->Temp(cur_time);
+          if ((temp != TEMP_UNINITIALIZED) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
+            cold_sstable_may_exist = true;
+            break;
+          }
+        }
       }
+
+      if (cold_sstable_may_exist)
+        _db->MutantMayScheduleCompaction(_cfd);
     }
   } catch (const exception& e) {
     TRACE << boost::format("Exception: %s\n") % e.what();
@@ -615,10 +629,7 @@ void TabletAccMon::_SstMigrationTriggererRun() {
 }
 
 void TabletAccMon::_SstMigrationTriggererSleep() {
-  // Update every 1 minute in simulated time.
-  // Note: Optionize later.
-  static const long temp_update_interval_ms = TEMP_UPDATE_INTERVAL_SIMULATED_TIME_SEC * 1000.0 * _simulation_over_simulated_time_dur;
-  static const auto wait_dur = chrono::milliseconds(temp_update_interval_ms);
+  static const auto wait_dur = chrono::milliseconds(long(SST_MIGRATION_TRIGGERER_INTERVAL_SIMULATED_TIME_SEC * 1000.0 * _simulation_over_simulated_time_dur));
   unique_lock<mutex> lk(_smt_sleep_mutex);
   _smt_sleep_cv.wait_for(lk, wait_dur, [&](){return _smt_wakeupnow;});
   _smt_wakeupnow = false;

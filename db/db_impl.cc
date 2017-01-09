@@ -2936,12 +2936,21 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
 // Mutant's temperature-based compaction (migration) is scheduled when there is
 // no regular leveled compaction is scheduled.  Didn't use ManualCompaction,
 // which seems to take priority over background compactions.
-void DBImpl::MutantScheduleCompaction(ColumnFamilyData* cfd) {
+void DBImpl::MutantMayScheduleCompaction(ColumnFamilyData* cfd) {
   InstrumentedMutexLock l(&mutex_);
+
+  if (unscheduled_compactions_ > 0)
+    return;
 
   AddToCompactionQueue(cfd);
   ++unscheduled_compactions_;
   MaybeScheduleFlushOrCompaction();
+}
+
+
+int DBImpl::UnscheduledCompactions() {
+  InstrumentedMutexLock l(&mutex_);
+  return unscheduled_compactions_;
 }
 
 
@@ -3305,13 +3314,12 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
 Status DBImpl::BackgroundCompaction(bool* made_progress,
                                     JobContext* job_context,
                                     LogBuffer* log_buffer, void* arg) {
-  // Mutant: figuring out how this is called
-  //TRACE << "Figuring out the code path: " << Util::StackTrace(2) << "\n";
+  // TRACE << Util::StackTrace(1) << "\n";
   //
   // rocksdb::DBImpl::BackgroundCallCompaction(void*)
   // rocksdb::ThreadPool::BGThread(unsigned long)
   //
-  //TRACE << boost::format("%d\n") % std::this_thread::get_id();
+  // TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   ManualCompaction* manual_compaction =
       reinterpret_cast<ManualCompaction*>(arg);

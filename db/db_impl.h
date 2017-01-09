@@ -504,7 +504,8 @@ class DBImpl : public DB {
   Status NewDB();
 
   // Mutant
-  void MutantScheduleCompaction(ColumnFamilyData* cfd);
+  void MutantMayScheduleCompaction(ColumnFamilyData* cfd);
+  int UnscheduledCompactions();
   Status MutantGetMetadataForFile(uint64_t number, int* filelevel,
       FileMetaData** meta, ColumnFamilyData** cfd);
 
