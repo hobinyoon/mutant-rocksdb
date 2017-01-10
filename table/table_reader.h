@@ -76,8 +76,6 @@ class TableReader {
   //               option is effective only for block-based table format.
   virtual Status Get(const ReadOptions& readOptions, const Slice& key,
                      GetContext* get_context, bool skip_filters = false) = 0;
-  virtual Status Get(const ReadOptions& readOptions, const Slice& key,
-                     GetContext* get_context, const FileDescriptor* fd, bool skip_filters = false) = 0;
 
   // Prefetch data corresponding to a give range of keys
   // Typically this functionality is required for table implementations that

@@ -165,13 +165,10 @@ Status TableCache::FindTable(const EnvOptions& env_options,
       if (s.ok()) {
         // Mutant: Limit this to the "default" CF. Do you need to? RocksDB
         // seems to store only user SSTables. Then, no.
-        //
-        // Some of them have level -1. It is set in
-        // FinishCompactionOutputFile() after this function is done.
-        //
-        // Mutant: TODO: Change the interface so you don't have to worry about the time window.
         TabletAccMon::SstOpened(table_reader.get(), &fd, level);
 
+        // Some of the SSTables used to have level -1. Not any more after
+        // updating the code in FinishCompactionOutputFile().
         if (false && level == -1) {
           TRACE << Util::StackTrace(1) << "\n";
 
@@ -184,11 +181,6 @@ Status TableCache::FindTable(const EnvOptions& env_options,
           //   rocksdb::FileDescriptor const&, rocksdb::TableReader**,
           //   rocksdb::HistogramImpl*, bool, rocksdb::Arena*, bool, int)
           // rocksdb::CompactionJob::FinishCompactionOutputFile(rocksdb::Status const&, rocksdb::CompactionJob::SubcompactionState*)
-          //
-          // - TODO: You need FileMetaData for TabletAccMon to be able to check
-          // if a file is being_compacted. Revisit the calling function of that
-          // to make sure you really need to cache it!
-          //
           // rocksdb::CompactionJob::ProcessKeyValueCompaction(rocksdb::CompactionJob::SubcompactionState*)
           // rocksdb::CompactionJob::Run()
           // rocksdb::DBImpl::BackgroundCompaction(bool*, rocksdb::JobContext*, rocksdb::LogBuffer*, void*)
@@ -342,7 +334,7 @@ Status TableCache::Get(const ReadOptions& options,
     get_context->SetReplayLog(row_cache_entry);  // nullptr if no cache.
     // *t is of type BlockBasedTable
     //TRACE << boost::format("*t is of type %s\n") % typeid(*t).name();
-    s = t->Get(options, k, get_context, &fd, skip_filters);
+    s = t->Get(options, k, get_context, skip_filters);
     get_context->SetReplayLog(nullptr);
     if (handle != nullptr) {
       ReleaseHandle(handle);

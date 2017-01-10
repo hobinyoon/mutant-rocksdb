@@ -1398,14 +1398,6 @@ bool BlockBasedTable::FullFilterKeyMayMatch(const ReadOptions& read_options,
 Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
                             GetContext* get_context,
                             bool skip_filters) {
-  return Get(read_options, key, get_context, NULL, skip_filters);
-}
-
-Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
-                            GetContext* get_context,
-                            // Mutant: TODO: clean up fd. not used.
-                            const FileDescriptor* fd,
-                            bool skip_filters) {
   //TRACE << boost::format("skip_filters=%d\n") % skip_filters;
   Status s;
   CachableEntry<FilterBlockReader> filter_entry;

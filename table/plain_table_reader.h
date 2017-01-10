@@ -85,8 +85,6 @@ class PlainTableReader: public TableReader {
 
   Status Get(const ReadOptions&, const Slice& key, GetContext* get_context,
              bool skip_filters = false) override;
-  Status Get(const ReadOptions&, const Slice& key, GetContext* get_context,
-             const FileDescriptor* fd, bool skip_filters = false) override;
 
   uint64_t ApproximateOffsetOf(const Slice& key) override;
 

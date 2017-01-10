@@ -85,47 +85,12 @@ public:
   // This is called with _sstMapLock2 held.
   void UpdateTemp(long reads, double reads_per_64MB_per_sec, const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
-      // Let's make it simple. It's good for a super young SSTable to have a
-      // high temperature, so that when it's compacted with other SSTables
-      // the output SSTables don't go to higher-level storage devices.
+      // When you get a first accfreq, assume the same amount of accesses have
+      // been there before for an infinite amount of time.
+      //
+      // This might cause a peak in the beginning and prevent a compaction
+      // including this one from generating cold SSTables, but that's ok.
       _temp = reads_per_64MB_per_sec;
-
-#if 0
-      double age_simulated_time = (t - _created).total_nanoseconds() / 1000000000.0 / _simulation_over_simulated_time_dur;
-      if (age_simulated_time < MIN_AGE_SEC_BEFORE_INIT_TEMP_SIMULATED_TIME) {
-        _initial_reads += reads;
-      } else {
-        // When there is a gap between the creation and the first hits, use
-        // reads_per_64MB_per_sec. RocksDB might have been busy not having
-        // enough time to update the stat.
-        if (_initial_reads == 0) {
-          _temp = reads_per_64MB_per_sec;
-        } else {
-          //  When there have been reads before (no gap), use the average
-          //  during the time window.
-          _initial_reads += reads;
-          _temp = _initial_reads / (_size/(64.0*1024*1024)) / age_simulated_time;
-        }
-
-        // TODO: Setting temp_level can be separated from here. It can be done
-        // in the triggerer thread.
-        //
-        // Here, _temp_level is always 0 here. When _temp is cold, assume the
-        // SSTable has been cold from the beginning.
-        //if (_temp < SST_TEMP_BECOME_COLD_THRESHOLD) {
-        //  _became_cold_at_simulation_time = _created;
-        //  _became_cold_at_defined = true;
-
-        //  // Mark as cold
-        //  _temp_level = 1;
-        //  TRACE << boost::format("Sst %d:%d became cold at %s in simulation time\n")
-        //    % _fd->GetNumber() % _level % _became_cold_at_simulation_time;
-        //  // TODO: trigger migration. either here or using a separate
-        //  // thread. TODO: check out the compation code and figure out how
-        //  // you do it.
-        //}
-      }
-#endif
       _last_updated = t;
     } else {
       double dur_since_last_update_in_sec_simulated_time = (t - _last_updated).total_nanoseconds()
@@ -634,16 +599,6 @@ void TabletAccMon::_SstMigrationTriggererSleep() {
   _smt_sleep_cv.wait_for(lk, wait_dur, [&](){return _smt_wakeupnow;});
   _smt_wakeupnow = false;
 }
-
-
-// Not used for now
-//void TabletAccMon::_SstMigrationTriggererWakeup() {
-//  {
-//    lock_guard<mutex> lk(_smt_sleep_mutex);
-//    _smt_wakeupnow = true;
-//  }
-//  _smt_sleep_cv.notify_one();
-//}
 
 
 void TabletAccMon::Init(DBImpl* db, EventLogger* el) {
