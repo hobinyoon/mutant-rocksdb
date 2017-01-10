@@ -346,9 +346,18 @@ uint32_t TabletAccMon::_CalcOutputPathId(const FileMetaData* fmd) {
 
 
 FileMetaData* TabletAccMon::_PickSstForMigration(int& level_for_migration) {
-  double temp_min = -1.0;
   // nullptr is for no SSTable suitable for migration
   FileMetaData* fmd_with_temp_min = nullptr;
+
+  if (!_db)
+    return fmd_with_temp_min;
+
+  // To minimize calling GetMetadataForFile(), we first get a sorted list of
+  // sst_ids by their temperature.  GetMetadataForFile() is not very efficient,
+  // it has a nested loop.
+  //
+  // map<temp, sst_id>
+  map<double, uint64_t> temp_sstid;
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
@@ -365,13 +374,17 @@ FileMetaData* TabletAccMon::_PickSstForMigration(int& level_for_migration) {
     if (st->PathId() > 0)
       continue;
 
-    if (!_db)
-      return fmd_with_temp_min;
+    double temp = st->Temp(cur_time);
+    if ((temp != TEMP_UNINITIALIZED) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD))
+      temp_sstid[temp] = sst_id;
+  }
+
+  for (auto i: temp_sstid) {
+    uint64_t sst_id = i.second;
 
     int filelevel;
     FileMetaData* fmd;
     ColumnFamilyData* cfd;
-    // TODO: Not very efficient. GetMetadataForFile() has a nested loop.
     Status s = _db->MutantGetMetadataForFile(sst_id, &filelevel, &fmd, &cfd);
     if (s.code() == Status::kNotFound) {
       // This rarely happens, but happens. Ignore the sst.
@@ -384,22 +397,13 @@ FileMetaData* TabletAccMon::_PickSstForMigration(int& level_for_migration) {
     if (fmd->being_compacted)
       continue;
 
-    double temp = st->Temp(cur_time);
-    if ((temp != TEMP_UNINITIALIZED) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
-      if (fmd_with_temp_min == nullptr) {
-        temp_min = temp;
-        fmd_with_temp_min = fmd;
-        level_for_migration = level;
-      } else {
-        if (temp < temp_min) {
-          temp_min = temp;
-          fmd_with_temp_min = fmd;
-          level_for_migration = level;
-        }
-      }
-    }
+    fmd_with_temp_min = fmd;
+    level_for_migration = filelevel;
   }
 
+  // There is no guarantee that the fmd points to a live SSTable after it is
+  // returned. I think the sames goes with the regular compaction picking path.
+  // Hope the compaction implementation takes care of it.
   return fmd_with_temp_min;
 }
 
@@ -563,7 +567,7 @@ void TabletAccMon::_SstMigrationTriggererRun() {
       //
       // A simpler, is-there-any-cold-SSTable check. The full check is done
       // later in _PickSstForMigration().
-      bool cold_sstable_may_exist = false;
+      bool may_have_sstable_to_migrate = false;
       boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
       {
         lock_guard<mutex> _(_sstMapLock2);
@@ -580,13 +584,13 @@ void TabletAccMon::_SstMigrationTriggererRun() {
 
           double temp = st->Temp(cur_time);
           if ((temp != TEMP_UNINITIALIZED) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
-            cold_sstable_may_exist = true;
+            may_have_sstable_to_migrate = true;
             break;
           }
         }
       }
 
-      if (cold_sstable_may_exist)
+      if (may_have_sstable_to_migrate)
         _db->MutantMayScheduleCompaction(_cfd);
     }
   } catch (const exception& e) {

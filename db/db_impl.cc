@@ -2954,8 +2954,6 @@ int DBImpl::UnscheduledCompactions() {
 }
 
 
-// Mutant: TODO: rewrite the code
-// GetMetadataForFile() has a nested loop. Doesn't seem so efficient.
 Status DBImpl::MutantGetMetadataForFile(uint64_t number, int* filelevel,
     FileMetaData** meta, ColumnFamilyData** cfd) {
   //TRACE << boost::format("%d\n") % std::this_thread::get_id();
