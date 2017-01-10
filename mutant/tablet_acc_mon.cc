@@ -31,7 +31,7 @@ const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _s
 const double TEMP_UNINITIALIZED = -1.0;
 const double TEMP_DECAY_FACTOR = 0.999;
 const double SST_TEMP_BECOME_COLD_THRESHOLD = 20.0;
-const long REPORT_INTERVAL_SEC_SIMULATED_TIME = 60;
+const long TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME = 60;
 const long SST_MIGRATION_TRIGGERER_INTERVAL_SIMULATED_TIME_SEC = 60;
 
 
@@ -142,12 +142,9 @@ TabletAccMon& TabletAccMon::_GetInst() {
 // This object is not released, since it's a singleton object.
 TabletAccMon::TabletAccMon()
 : _updatedSinceLastOutput(false)
-  , _reporter_thread(thread(bind(&rocksdb::TabletAccMon::_ReporterRun, this)))
+  , _temp_updater_thread(thread(bind(&rocksdb::TabletAccMon::_TempUpdaterRun, this)))
   , _smt_thread(thread(bind(&rocksdb::TabletAccMon::_SstMigrationTriggererRun, this)))
 {
-  // http://stackoverflow.com/questions/7381757/c-terminate-called-without-an-active-exception
-  _reporter_thread.detach();
-  _smt_thread.detach();
 }
 
 
@@ -181,7 +178,7 @@ void TabletAccMon::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
     lock_guard<mutex> lk2(_memtSetLock2);
     _memtSet.insert(m);
     // Note: Log creation/deletion time, if needed. You don't need to wake up
-    // the reporter thread.
+    // the temp_updater thread.
   } else {
     THROW("Unexpected");
   }
@@ -197,8 +194,8 @@ void TabletAccMon::_MemtDeleted(MemTable* m) {
   if (it == _memtSet.end()) {
     THROW("Unexpected");
   } else {
-    // Report for the last time before erasing the entry
-    _ReportAndWait();
+    // Update temp and report for the last time before erasing the entry
+    _RunTempUpdaterAndWait();
 
     lock_guard<mutex> lk2(_memtSetLock2);
     _memtSet.erase(it);
@@ -233,11 +230,11 @@ void TabletAccMon::_SstClosed(BlockBasedTable* bbt) {
     TRACE << boost::format("Hmm... Sst %d closed without having been opened\n") % sst_id;
     //THROW("Unexpected");
   } else {
-    // Report for the last time before erasing the entry.
-    _ReportAndWait();
+    // Update temp and report for the last time before erasing the entry.
+    _RunTempUpdaterAndWait();
 
     // You need a 2-level locking with _sstMapLock and _sstMapLock2.
-    // _ReportAndWait() waits for the reporter thread to finish a cycle, which
+    // _RunTempUpdaterAndWait() waits for the temp_updater thread to finish a cycle, which
     // acquires _sstMapLock2. The same goes with _memtSetLock2.
     lock_guard<mutex> lk2(_sstMapLock2);
     delete it->second;
@@ -407,19 +404,19 @@ FileMetaData* TabletAccMon::_PickSstForMigration(int& level_for_migration) {
 }
 
 
-void TabletAccMon::_ReporterRun() {
+void TabletAccMon::_TempUpdaterRun() {
   try {
     boost::posix_time::ptime prev_time;
 
-    while (true) {
-      _ReporterSleep();
+    while (! _temp_updater_stop_requested) {
+      _TempUpdaterSleep();
 
       {
-        lock_guard<mutex> lk(_reporting_mutex);
+        lock_guard<mutex> lk(_temp_updating_mutex);
 
         boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
-        // A 2-level check. _reporter_sleep_cv alone is not enough, since this
+        // A 2-level check. _temp_updater_sleep_cv alone is not enough, since this
         // thread is woken up every second anyway.
         //
         // Print out the access stat. The entries are already sorted numerically.
@@ -448,14 +445,17 @@ void TabletAccMon::_ReporterRun() {
 
               long c = st->GetAndResetNumReads();
               if (c > 0) {
-                double dur_since_last_report_simulated_time;
+                double dur_since_last_update_simulated_time;
                 if (prev_time.is_not_a_date_time()) {
-                  dur_since_last_report_simulated_time = REPORT_INTERVAL_SEC_SIMULATED_TIME;
+                  // No need to worry about the time duration and the
+                  // inaccuracy.  This happens only once right after RocksDB is
+                  // initialized.
+                  dur_since_last_update_simulated_time = TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME;
                 } else {
-                  dur_since_last_report_simulated_time = (cur_time - prev_time).total_nanoseconds()
+                  dur_since_last_update_simulated_time = (cur_time - prev_time).total_nanoseconds()
                     / 1000000000.0 / _simulation_over_simulated_time_dur;
                 }
-                double reads_per_64MB_per_sec = double(c) / (st->Size() / (64.0*1024*1024)) / dur_since_last_report_simulated_time;
+                double reads_per_64MB_per_sec = double(c) / (st->Size() / (64.0*1024*1024)) / dur_since_last_update_simulated_time;
 
                 // Update temperature. You don't need to update st when c != 0.
                 st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
@@ -485,11 +485,12 @@ void TabletAccMon::_ReporterRun() {
           _updatedSinceLastOutput = false;
         }
 
-        // Update it whether the monitor actually has something to report or not.
+        // Set updated whether or not the monitor actually has something to update.
         prev_time = cur_time;
-        _reported = true;
+        _temp_updated = true;
       }
-      _reported_cv.notify_one();
+      // There can be multiple threads waiting for this. Notify them all.
+      _temp_updated_cv.notify_all();
     }
   } catch (const exception& e) {
     TRACE << boost::format("Exception: %s\n") % e.what();
@@ -498,44 +499,45 @@ void TabletAccMon::_ReporterRun() {
 }
 
 
-// Sleep for REPORT_INTERVAL_SEC_SIMULATED_TIME or until woken up by another thread.
-void TabletAccMon::_ReporterSleep() {
-  static const auto wait_dur = chrono::milliseconds(long(REPORT_INTERVAL_SEC_SIMULATED_TIME * 1000.0 * _simulation_over_simulated_time_dur));
+// Sleep for TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME or until woken up by another thread.
+void TabletAccMon::_TempUpdaterSleep() {
+  static const auto wait_dur = chrono::milliseconds(long(TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME * 1000.0 * _simulation_over_simulated_time_dur));
   //TRACE << boost::format("%d ms\n") % wait_dur.count();
-  unique_lock<mutex> lk(_reporter_sleep_mutex);
-  _reporter_sleep_cv.wait_for(lk, wait_dur, [&](){return _reporter_wakeupnow;});
-  _reporter_wakeupnow = false;
+  unique_lock<mutex> lk(_temp_updater_sleep_mutex);
+  _temp_updater_sleep_cv.wait_for(lk, wait_dur, [&](){return _temp_updater_wakeupnow;});
+  _temp_updater_wakeupnow = false;
 }
 
 
-void TabletAccMon::_ReporterWakeup() {
+void TabletAccMon::_TempUpdaterWakeup() {
   // This wakes up the waiting thread even if this is called before wait.
-  // _reporter_wakeupnow does the magic.
+  // _temp_updater_wakeupnow does the magic.
   {
-    lock_guard<mutex> lk(_reporter_sleep_mutex);
-    _reporter_wakeupnow = true;
+    lock_guard<mutex> lk(_temp_updater_sleep_mutex);
+    _temp_updater_wakeupnow = true;
   }
-  _reporter_sleep_cv.notify_one();
+  _temp_updater_sleep_cv.notify_one();
 }
 
 
-void TabletAccMon::_ReportAndWait() {
-  // The whole reporting block needs to be protected for this.  When the
-  // reporter thread is ready entering the reporting block, the reporting block
-  // can be called twice, which is okay - the second one won't print out
-  // anything.
+// Run a cycle of temp updater and wait.  This is called when a Memtable or
+// SSTable is about to be gone.  This is not to miss any updates on them. You
+// never know if there will be a spike at the end of the lifetime.
+void TabletAccMon::_RunTempUpdaterAndWait() {
   {
-    lock_guard<mutex> _(_reporting_mutex);
-    _reported = false;
+    lock_guard<mutex> _(_temp_updating_mutex);
+    _temp_updated = false;
   }
 
-  //TRACE << "force reporting\n";
-  _ReporterWakeup();
+  // Force wakeup to minimize the wait time.
+  _TempUpdaterWakeup();
 
-  // Wait for the reporter finish a reporting
+  // Wait for the temp_updater to finish a update cycle
   {
-    unique_lock<mutex> lk(_reporting_mutex);
-    _reported_cv.wait(lk, [&](){return _reported;});
+    unique_lock<mutex> _(_temp_updating_mutex);
+    if (! _temp_updater_stop_requested) {
+      _temp_updated_cv.wait(_, [&](){return _temp_updated;});
+    }
   }
 }
 
@@ -547,7 +549,7 @@ void TabletAccMon::_ReportAndWait() {
 // you get "Compaction nothing to do".
 void TabletAccMon::_SstMigrationTriggererRun() {
   try {
-    while (true) {
+    while (! _smt_stop_requested) {
       _SstMigrationTriggererSleep();
 
       if (!_cfd)
@@ -593,11 +595,35 @@ void TabletAccMon::_SstMigrationTriggererRun() {
   }
 }
 
+
 void TabletAccMon::_SstMigrationTriggererSleep() {
   static const auto wait_dur = chrono::milliseconds(long(SST_MIGRATION_TRIGGERER_INTERVAL_SIMULATED_TIME_SEC * 1000.0 * _simulation_over_simulated_time_dur));
   unique_lock<mutex> lk(_smt_sleep_mutex);
   _smt_sleep_cv.wait_for(lk, wait_dur, [&](){return _smt_wakeupnow;});
   _smt_wakeupnow = false;
+}
+
+
+void TabletAccMon::_SstMigrationTriggererWakeup() {
+  {
+    lock_guard<mutex> _(_smt_sleep_mutex);
+    _smt_wakeupnow = true;
+  }
+  _smt_sleep_cv.notify_one();
+}
+
+
+void TabletAccMon::_Shutdown() {
+  _smt_stop_requested = true;
+  _SstMigrationTriggererWakeup();
+  _smt_thread.join();
+
+  {
+    lock_guard<mutex> _(_temp_updating_mutex);
+    _temp_updater_stop_requested = true;
+    _TempUpdaterWakeup();
+  }
+  _temp_updater_thread.join();
 }
 
 
@@ -682,12 +708,6 @@ void TabletAccMon::SstClosed(BlockBasedTable* bbt) {
 }
 
 
-void TabletAccMon::ReportAndWait() {
-  static TabletAccMon& i = _GetInst();
-  i._ReportAndWait();
-}
-
-
 void TabletAccMon::SetUpdated() {
   static TabletAccMon& i = _GetInst();
   i._SetUpdated();
@@ -712,6 +732,12 @@ uint32_t TabletAccMon::CalcOutputPathId(const FileMetaData* fmd) {
 FileMetaData* TabletAccMon::PickSstForMigration(int& level_for_migration) {
   static TabletAccMon& i = _GetInst();
   return i._PickSstForMigration(level_for_migration);
+}
+
+
+void TabletAccMon::Shutdown() {
+  static TabletAccMon& i = _GetInst();
+  i._Shutdown();
 }
 
 }

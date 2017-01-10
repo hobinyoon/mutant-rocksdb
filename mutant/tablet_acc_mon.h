@@ -27,9 +27,11 @@ class TabletAccMon {
   EventLogger* _logger = nullptr;
   ColumnFamilyData* _cfd = nullptr;
 
-  // We don't use an expensive atomic operation here. It's about when to
-  // report, and it's okay we are not super accurate about the timing. This is
-  // updated everytime any tablet is read.
+  // This is updated very frequently by threads whenever a SSTable or a
+  // MemTable is read, thus we don't used an expensive atomic operation here.
+  //
+  // It only affects the temp updater thread when to update, and it's ok that
+  // it's delayed by a tiny little bit, due to the relaxed cache coherency.
   bool _updatedSinceLastOutput;
 
   // SSTable access monitoring is for the SSTable migration decisions.
@@ -49,20 +51,24 @@ class TabletAccMon {
   std::mutex _sstMapLock;
   std::mutex _sstMapLock2;
 
-  std::thread _reporter_thread;
-  std::mutex _reporter_sleep_mutex;
-  std::condition_variable _reporter_sleep_cv;
-  bool _reporter_wakeupnow = false;
+  std::thread _temp_updater_thread;
+  std::mutex _temp_updater_sleep_mutex;
+  std::condition_variable _temp_updater_sleep_cv;
+  bool _temp_updater_wakeupnow = false;
 
-  std::mutex _reporting_mutex;
-  bool _reported = false;
-  std::condition_variable _reported_cv;
+  std::mutex _temp_updating_mutex;
+  bool _temp_updated = false;
+  std::condition_variable _temp_updated_cv;
+
+  bool _temp_updater_stop_requested = false;
 
   // SSTable migration triggerer
   std::thread _smt_thread;
   std::mutex _smt_sleep_mutex;
   std::condition_variable _smt_sleep_cv;
   bool _smt_wakeupnow = false;
+
+  bool _smt_stop_requested = false;
 
   static TabletAccMon& _GetInst();
 
@@ -73,7 +79,7 @@ class TabletAccMon {
   void _MemtDeleted(MemTable* m);
   void _SstOpened(TableReader* tr, const FileDescriptor* fd, int level);
   void _SstClosed(BlockBasedTable* bbt);
-  void _ReportAndWait();
+  void _RunTempUpdaterAndWait();
   void _SetUpdated();
   double _Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time);
   uint32_t _CalcOutputPathId(
@@ -83,13 +89,15 @@ class TabletAccMon {
   uint32_t _CalcOutputPathId(const FileMetaData* fmd);
   FileMetaData*_PickSstForMigration(int& level_for_migration);
 
-  void _ReporterRun();
-  void _ReporterSleep();
-  void _ReporterWakeup();
+  void _TempUpdaterRun();
+  void _TempUpdaterSleep();
+  void _TempUpdaterWakeup();
 
   void _SstMigrationTriggererRun();
   void _SstMigrationTriggererSleep();
   void _SstMigrationTriggererWakeup();
+
+  void _Shutdown();
 
 public:
   static void Init(DBImpl* db, EventLogger* el);
@@ -97,7 +105,6 @@ public:
   static void MemtDeleted(MemTable* m);
   static void SstOpened(TableReader* tr, const FileDescriptor* fd, int level);
   static void SstClosed(BlockBasedTable* bbt);
-  static void ReportAndWait();
   static void SetUpdated();
 
   static uint32_t CalcOutputPathId(
@@ -107,6 +114,8 @@ public:
   static uint32_t CalcOutputPathId(const FileMetaData* fmd);
 
   static FileMetaData* PickSstForMigration(int& level_for_migration);
+
+  static void Shutdown();
 };
 
 }

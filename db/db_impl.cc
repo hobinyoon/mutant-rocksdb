@@ -386,6 +386,9 @@ void DBImpl::CancelAllBackgroundWork(bool wait) {
 }
 
 DBImpl::~DBImpl() {
+  // Mutant. Shutdown threads. Waiting-for-background-work-done is below.
+  TabletAccMon::Shutdown();
+
   mutex_.Lock();
 
   if (!shutting_down_.load(std::memory_order_acquire) &&
@@ -440,9 +443,6 @@ DBImpl::~DBImpl() {
     delete default_cf_handle_;
     mutex_.Lock();
   }
-
-  // Mutant. Synchronously report for the last time.
-  TabletAccMon::ReportAndWait();
 
   // Clean up obsolete files due to SuperVersion release.
   // (1) Need to delete to obsolete files before closing because RepairDB()
