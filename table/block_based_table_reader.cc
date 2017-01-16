@@ -652,7 +652,11 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
     // pre-fetching of blocks is turned on
   // Will use block cache for index/filter blocks access
   // Always prefetch index and filter for level 0
-  // Mutant: TODO: cache those of cold SSTables in memory
+  // Mutant: Cache those at all levels. I wonder how often these happen.  It
+  // can make a good story if you can identify them.
+  //
+  // Mutant: TODO: How big are the filter and index blocks?  It was easy to
+  // calculate in Cassandra since they have separate files.
   if (table_options.cache_index_and_filter_blocks) {
     if (prefetch_index_and_filter_in_cache || level == 0) {
       assert(table_options.block_cache != nullptr);
@@ -664,14 +668,22 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
       // to NewIndexIterator(), which will save the index block in there
       // else it's a nullptr and nothing special happens
       CachableEntry<IndexReader>* index_entry = nullptr;
-      if (rep->table_options.pin_l0_filter_and_index_blocks_in_cache &&
-          level == 0) {
+      //if (rep->table_options.pin_l0_filter_and_index_blocks_in_cache && level == 0) {
+      // Mutant
+      if (rep->table_options.pin_l0_filter_and_index_blocks_in_cache) {
+        //TRACE << boost::format("%d sst_id=%d path_id=%d\n")
+        //  % std::this_thread::get_id() % fd->GetNumber() % fd->GetPathId();
         index_entry = &rep->index_entry;
       }
       unique_ptr<InternalIterator> iter(
           new_table->NewIndexIterator(ReadOptions(), nullptr, index_entry));
       s = iter->status();
 
+      // Mutant: tracing filter size
+      // filter_entry is of type class BlockBasedFilterBlockReader
+      //   BlockContents contents_;
+      //     Slice data;
+      //       size()
       if (s.ok()) {
         // Hack: Call GetFilter() to implicitly add filter to the block_cache
         auto filter_entry = new_table->GetFilter();
@@ -679,8 +691,12 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
         // a level0 file, then save it in rep_->filter_entry; it will be
         // released in the destructor only, hence it will be pinned in the
         // cache while this reader is alive
-        if (rep->table_options.pin_l0_filter_and_index_blocks_in_cache &&
-            level == 0) {
+        //
+        // if (rep->table_options.pin_l0_filter_and_index_blocks_in_cache && level == 0) {
+        // Mutant
+        if (rep->table_options.pin_l0_filter_and_index_blocks_in_cache) {
+          //TRACE << boost::format("%d sst_id=%d path_id=%d\n")
+          //  % std::this_thread::get_id() % fd->GetNumber() % fd->GetPathId();
           rep->filter_entry = filter_entry;
         } else {
           filter_entry.Release(table_options.block_cache.get());
