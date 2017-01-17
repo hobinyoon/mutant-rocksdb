@@ -339,6 +339,7 @@ class MemTable {
   friend class MemTableIterator;
   friend class MemTableBackwardIterator;
   friend class MemTableList;
+  friend class Mutant;
 
   KeyComparator comparator_;
   const MemTableOptions moptions_;
@@ -397,7 +398,6 @@ class MemTable {
   MemTable& operator=(const MemTable&);
 
   // Mutant
-  friend class TabletAccMon;
   std::atomic<long> _num_reads;
 };
 

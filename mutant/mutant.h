@@ -8,6 +8,8 @@
 
 #include <boost/date_time/posix_time/posix_time.hpp>
 
+#include "rocksdb/options.h"
+
 
 namespace rocksdb {
 
@@ -22,7 +24,31 @@ class TableReader;
 
 class SstTemp;
 
-class TabletAccMon {
+// Mutant design
+// -------------
+// Flush job thread:
+// - When a flush is done, updates Mutant with the creation (thus newly opened)
+//   of output SSTables so that Mutant can monitor.
+//
+// Compaction job thread:
+// - queries Mutant for the temperature level of the input SSTables.
+// - When a compaction is done, updates Mutant with the creation (thus opened)
+//   of output SSTables so that Mutant can monitor.
+//
+// Which thread(?):
+// - When an existing SSTable is open, update Mutant with the open SSTables.
+//
+// Read thread: updates SSTable access count
+//
+// Temperature-update thread:
+//   pulls SSTable accesses periodically and updates their temperature.
+//
+// Migration triggerer thread:
+//   checks (hot) SSTable temperatures periodically and when then become cold,
+//   triggers migration.
+
+class Mutant {
+  MutantOptions _options;
   DBImpl* _db = nullptr;
   EventLogger* _logger = nullptr;
   ColumnFamilyData* _cfd = nullptr;
@@ -51,7 +77,7 @@ class TabletAccMon {
   std::mutex _sstMapLock;
   std::mutex _sstMapLock2;
 
-  std::thread _temp_updater_thread;
+  std::thread* _temp_updater_thread = nullptr;
   std::mutex _temp_updater_sleep_mutex;
   std::condition_variable _temp_updater_sleep_cv;
   bool _temp_updater_wakeupnow = false;
@@ -63,18 +89,18 @@ class TabletAccMon {
   bool _temp_updater_stop_requested = false;
 
   // SSTable migration triggerer
-  std::thread _smt_thread;
+  std::thread* _smt_thread = nullptr;;
   std::mutex _smt_sleep_mutex;
   std::condition_variable _smt_sleep_cv;
   bool _smt_wakeupnow = false;
 
   bool _smt_stop_requested = false;
 
-  static TabletAccMon& _GetInst();
+  static Mutant& _GetInst();
 
-  TabletAccMon();
+  Mutant();
 
-  void _Init(DBImpl* db, EventLogger* el);
+  void _Init(const MutantOptions* mo, DBImpl* db, EventLogger* el);
   void _MemtCreated(ColumnFamilyData* cfd, MemTable* m);
   void _MemtDeleted(MemTable* m);
   void _SstOpened(TableReader* tr, const FileDescriptor* fd, int level);
@@ -99,7 +125,7 @@ class TabletAccMon {
   void _Shutdown();
 
 public:
-  static void Init(DBImpl* db, EventLogger* el);
+  static void Init(const MutantOptions* mo, DBImpl* db, EventLogger* el);
   static void MemtCreated(ColumnFamilyData* cfd, MemTable* m);
   static void MemtDeleted(MemTable* m);
   static void SstOpened(TableReader* tr, const FileDescriptor* fd, int level);

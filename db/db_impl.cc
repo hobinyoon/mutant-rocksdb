@@ -59,7 +59,7 @@
 #include "db/xfunc_test_points.h"
 #include "memtable/hash_linklist_rep.h"
 #include "memtable/hash_skiplist_rep.h"
-#include "mutant/tablet_acc_mon.h"
+#include "mutant/mutant.h"
 #include "port/likely.h"
 #include "port/port.h"
 #include "rocksdb/cache.h"
@@ -387,7 +387,7 @@ void DBImpl::CancelAllBackgroundWork(bool wait) {
 
 DBImpl::~DBImpl() {
   // Mutant. Shutdown threads. Waiting-for-background-work-done is below.
-  TabletAccMon::Shutdown();
+  Mutant::Shutdown();
 
   mutex_.Lock();
 
@@ -3505,7 +3505,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
         // the input and output SSTables are at different levels.
         //TRACE << boost::format("%d sst_id=%d path_id=%d Trivial move\n")
         //  % std::this_thread::get_id() % f->fd.GetNumber() % f->fd.GetPathId();
-        uint32_t output_path_id = TabletAccMon::CalcOutputPathIdTrivialMove(f);
+        uint32_t output_path_id = Mutant::CalcOutputPathIdTrivialMove(f);
 
         c->edit()->AddFile(c->output_level(), f->fd.GetNumber(),
                            //f->fd.GetPathId(),
@@ -5733,11 +5733,12 @@ DB::~DB() { }
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   DBOptions db_options(options);
   ColumnFamilyOptions cf_options(options);
+  MutantOptions mutant_options(options);
   std::vector<ColumnFamilyDescriptor> column_families;
   column_families.push_back(
       ColumnFamilyDescriptor(kDefaultColumnFamilyName, cf_options));
   std::vector<ColumnFamilyHandle*> handles;
-  Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
+  Status s = DB::Open(db_options, dbname, column_families, &mutant_options, &handles, dbptr);
   if (s.ok()) {
     assert(handles.size() == 1);
     // i can delete the handle since DBImpl is always holding a reference to
@@ -5749,6 +5750,13 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
 
 Status DB::Open(const DBOptions& db_options, const std::string& dbname,
                 const std::vector<ColumnFamilyDescriptor>& column_families,
+                std::vector<ColumnFamilyHandle*>* handles, DB** dbptr) {
+  return Open(db_options, dbname, column_families, nullptr, handles, dbptr);
+}
+
+Status DB::Open(const DBOptions& db_options, const std::string& dbname,
+                const std::vector<ColumnFamilyDescriptor>& column_families,
+                const MutantOptions* mutant_options,
                 std::vector<ColumnFamilyHandle*>* handles, DB** dbptr) {
   Status s = SanitizeOptionsByTable(db_options, column_families);
   if (!s.ok()) {
@@ -5892,8 +5900,8 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
     impl->opened_successfully_ = true;
     impl->MaybeScheduleFlushOrCompaction();
 
-    // Assume TabletAccMon is used by a single DB instance
-    TabletAccMon::Init(impl, &(impl->event_logger_));
+    // Assume Mutant is used by a single DB instance
+    Mutant::Init(mutant_options, impl, &(impl->event_logger_));
   }
   impl->mutex_.Unlock();
 

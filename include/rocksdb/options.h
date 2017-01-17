@@ -1358,8 +1358,26 @@ struct DBOptions {
   bool avoid_flush_during_recovery;
 };
 
+
+struct MutantOptions {
+  // Mutant: TODO: Use it
+  bool mutant_enabled;
+
+  double simulation_time_dur_sec = 0.0;
+  double simulated_time_dur_sec = 0.0;
+
+  // Create MutantOptions with default values for all fields
+  MutantOptions();
+
+  // Create MutantOptions from Options
+  explicit MutantOptions(const Options& options);
+
+  void Dump(Logger* log) const;
+};
+
+
 // Options to control the behavior of a database (passed to DB::Open)
-struct Options : public DBOptions, public ColumnFamilyOptions {
+struct Options : public DBOptions, public ColumnFamilyOptions, public MutantOptions {
   // Create an Options object with default values for all fields.
   Options() : DBOptions(), ColumnFamilyOptions() {}
 

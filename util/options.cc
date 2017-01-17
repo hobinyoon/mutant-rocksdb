@@ -617,6 +617,7 @@ void ColumnFamilyOptions::Dump(Logger* log) const {
 void Options::Dump(Logger* log) const {
   DBOptions::Dump(log);
   ColumnFamilyOptions::Dump(log);
+  MutantOptions::Dump(log);
 }   // Options::Dump
 
 void Options::DumpCFOptions(Logger* log) const {
@@ -831,6 +832,26 @@ ReadOptions::ReadOptions(bool cksum, bool cache)
       readahead_size(0) {
   XFUNC_TEST("", "managed_options", managed_options, xf_manage_options,
              reinterpret_cast<ReadOptions*>(this));
+}
+
+
+MutantOptions::MutantOptions()
+{
+}
+
+MutantOptions::MutantOptions(const Options& o)
+  : mutant_enabled(o.mutant_enabled)
+  , simulation_time_dur_sec(o.simulation_time_dur_sec)
+  , simulated_time_dur_sec(o.simulated_time_dur_sec)
+{
+}
+
+void MutantOptions::Dump(Logger* log) const {
+  // TODO: Mutant: why is this not called?
+  Header(log, "MutantOptions:");
+  Header(log, "  Options.mutant_enabled: %d", mutant_enabled);
+  Header(log, "  Options.simulation_time_dur_sec: %f", simulation_time_dur_sec);
+  Header(log, "  Options.simulated_time_dur_sec: %f", simulated_time_dur_sec);
 }
 
 }  // namespace rocksdb

@@ -17,7 +17,7 @@
 #include "db/merge_context.h"
 #include "db/merge_helper.h"
 #include "db/pinned_iterators_manager.h"
-#include "mutant/tablet_acc_mon.h"
+#include "mutant/mutant.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/env.h"
 #include "rocksdb/iterator.h"
@@ -100,14 +100,14 @@ MemTable::MemTable(ColumnFamilyData* cfd,
 
   // Mutant. We use the address for the memtable ID. I don't see anything else
   // that can be used.
-  TabletAccMon::MemtCreated(cfd, this);
+  Mutant::MemtCreated(cfd, this);
 }
 
 MemTable::~MemTable() {
   assert(refs_ == 0);
 
   // Mutant
-  TabletAccMon::MemtDeleted(this);
+  Mutant::MemtDeleted(this);
 }
 
 size_t MemTable::ApproximateMemoryUsage() {
@@ -609,7 +609,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s,
 
   // Mutant
   _num_reads ++;
-  TabletAccMon::SetUpdated();
+  Mutant::SetUpdated();
 
   // No change to value, since we have not yet found a Put/Delete
   if (!found_final_value && merge_in_progress) {

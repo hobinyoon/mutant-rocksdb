@@ -425,7 +425,7 @@ BlockBasedTable::~BlockBasedTable() {
 
   // Mutant: With compaction_readahead_size set, this destructor is called
   // twice per SSTable. Interesting.
-  TabletAccMon::SstClosed(this);
+  Mutant::SstClosed(this);
 
   delete rep_;
 }
@@ -1463,7 +1463,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
         //
         // Mutant: Update access statistics
         _num_reads ++;
-        TabletAccMon::SetUpdated();
+        Mutant::SetUpdated();
 
         BlockIter stack_biter;
         if (pin_blocks) {

@@ -5,7 +5,7 @@
 #include "db/db_impl.h"
 #include "db/event_helpers.h"
 #include "db/version_edit.h"
-#include "mutant/tablet_acc_mon.h"
+#include "mutant/mutant.h"
 #include "table/block_based_table_reader.h"
 #include "util/event_logger.h"
 #include "util/util.h"
@@ -14,19 +14,9 @@ using namespace std;
 
 namespace rocksdb {
 
-// Note: make these configurable
-//const double _simulation_time_dur_sec =   60000.0  ;
-// For fast dev. On mjolnir, without limiting memory:
-//   With 6000 secs, about 90% CPU idle.
-//   With 4000 secs, about 85% CPU idle.
-//   With 2000 secs, about 55% CPU idle. I think this is good enough.
-
-// Working on multi db_paths. Let's go a bit faster.
-const double _simulation_time_dur_sec =   2000.0  ;
-
-const double _simulated_time_dur_sec  = 1365709.587;
-const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _simulated_time_dur_sec;
-// 22.761826, with the 60,000 sec simulation time
+// 22.761826, when the simulation time is 60,000 sec and the simulated time is
+// 1365709.587 secs.
+double _simulation_over_simulated_time_dur = 0.0;
 
 const double TEMP_UNINITIALIZED = -1.0;
 const double TEMP_DECAY_FACTOR = 0.999;
@@ -133,35 +123,59 @@ public:
 };
 
 
-TabletAccMon& TabletAccMon::_GetInst() {
-  static TabletAccMon i;
+Mutant& Mutant::_GetInst() {
+  static Mutant i;
   return i;
 }
 
 
 // This object is not released, since it's a singleton object.
-TabletAccMon::TabletAccMon()
+Mutant::Mutant()
 : _updatedSinceLastOutput(false)
-  , _temp_updater_thread(thread(bind(&rocksdb::TabletAccMon::_TempUpdaterRun, this)))
-  , _smt_thread(thread(bind(&rocksdb::TabletAccMon::_SstMigrationTriggererRun, this)))
 {
 }
 
 
-void TabletAccMon::_Init(DBImpl* db, EventLogger* el) {
+void Mutant::_Init(const MutantOptions* mo, DBImpl* db, EventLogger* el) {
+  // TRACE << boost::format("%d\n%s\n") % std::this_thread::get_id() % Util::StackTrace(1);
+  //
+  // rocksdb::Mutant::_Init(rocksdb::DBImpl*, rocksdb::EventLogger*)
+  // rocksdb::DB::Open(rocksdb::DBOptions const&, std::basic_string<char, std::char_traits<char>, std::allocator<char> > const&,
+  //   std::vector<rocksdb::ColumnFamilyDescriptor, std::allocator<rocksdb::ColumnFamilyDescriptor> > const&,
+  //   std::vector<rocksdb::ColumnFamilyHandle*, std::allocator<rocksdb::ColumnFamilyHandle*> >*, rocksdb::DB**)
+  // rocksdb::DB::Open(rocksdb::Options const&, std::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, rocksdb::DB**)
+  // __libc_start_main
+  
+  // Make a copy of the options
+  if (mo == nullptr)
+    THROW("Unexpected");
+  _options = *mo;
+
+  if (_options.simulation_time_dur_sec == 0.0)
+    THROW("Unexpected");
+  if (_options.simulated_time_dur_sec == 0.0)
+    THROW("Unexpected");
+
+  _simulation_over_simulated_time_dur = _options.simulation_time_dur_sec / _options.simulated_time_dur_sec;
+
   _db = db;
   _logger = el;
-  //TRACE << "TabletAccMon initialized\n";
 
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
-  jwriter << "mutant_table_acc_mon_init";
+  jwriter << "mutant_initialized";
   jwriter.EndObject();
   _logger->Log(jwriter);
+
+  // Let the threads start here! In the constructor, some of the members are not set yet.
+  if (_temp_updater_thread)
+    THROW("Unexpcted");
+  _temp_updater_thread = new thread(bind(&rocksdb::Mutant::_TempUpdaterRun, this));
+  _smt_thread = new thread(bind(&rocksdb::Mutant::_SstMigrationTriggererRun, this));
 }
 
 
-void TabletAccMon::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
+void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
   lock_guard<mutex> lk(_memtSetLock);
 
   if (_cfd == nullptr) {
@@ -185,7 +199,7 @@ void TabletAccMon::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
 }
 
 
-void TabletAccMon::_MemtDeleted(MemTable* m) {
+void Mutant::_MemtDeleted(MemTable* m) {
   lock_guard<mutex> lk(_memtSetLock);
 
   //TRACE << boost::format("MemtDeleted %p\n") % m;
@@ -203,7 +217,7 @@ void TabletAccMon::_MemtDeleted(MemTable* m) {
 }
 
 
-void TabletAccMon::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
+void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
   lock_guard<mutex> lk(_sstMapLock);
 
   uint64_t sst_id = fd->GetNumber();
@@ -221,7 +235,7 @@ void TabletAccMon::_SstOpened(TableReader* tr, const FileDescriptor* fd, int lev
 }
 
 
-void TabletAccMon::_SstClosed(BlockBasedTable* bbt) {
+void Mutant::_SstClosed(BlockBasedTable* bbt) {
   lock_guard<mutex> lk(_sstMapLock);
 
   uint64_t sst_id = bbt->SstId();
@@ -246,12 +260,12 @@ void TabletAccMon::_SstClosed(BlockBasedTable* bbt) {
 }
 
 
-void TabletAccMon::_SetUpdated() {
+void Mutant::_SetUpdated() {
   _updatedSinceLastOutput = true;
 }
 
 
-double TabletAccMon::_Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time) {
+double Mutant::_Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time) {
   lock_guard<mutex> _(_sstMapLock2);
   auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end())
@@ -261,7 +275,7 @@ double TabletAccMon::_Temperature(uint64_t sst_id, const boost::posix_time::ptim
 }
 
 
-uint32_t TabletAccMon::_CalcOutputPathId(
+uint32_t Mutant::_CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
     const std::vector<FileMetaData*>& file_metadata) {
   if (file_metadata.size() == 0)
@@ -328,7 +342,7 @@ uint32_t TabletAccMon::_CalcOutputPathId(
 
 
 // Trivial move. db/db_impl.cc:3508
-uint32_t TabletAccMon::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
+uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
   uint64_t sst_id = fmd->fd.GetNumber();
@@ -376,7 +390,7 @@ uint32_t TabletAccMon::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
 }
 
 
-FileMetaData* TabletAccMon::_PickSstForMigration(int& level_for_migration) {
+FileMetaData* Mutant::_PickSstForMigration(int& level_for_migration) {
   // nullptr is for no SSTable suitable for migration
   FileMetaData* fmd_with_temp_min = nullptr;
 
@@ -439,7 +453,7 @@ FileMetaData* TabletAccMon::_PickSstForMigration(int& level_for_migration) {
 }
 
 
-void TabletAccMon::_TempUpdaterRun() {
+void Mutant::_TempUpdaterRun() {
   try {
     boost::posix_time::ptime prev_time;
 
@@ -535,7 +549,7 @@ void TabletAccMon::_TempUpdaterRun() {
 
 
 // Sleep for TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME or until woken up by another thread.
-void TabletAccMon::_TempUpdaterSleep() {
+void Mutant::_TempUpdaterSleep() {
   static const auto wait_dur = chrono::milliseconds(long(TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME * 1000.0 * _simulation_over_simulated_time_dur));
   //TRACE << boost::format("%d ms\n") % wait_dur.count();
   unique_lock<mutex> lk(_temp_updater_sleep_mutex);
@@ -544,7 +558,7 @@ void TabletAccMon::_TempUpdaterSleep() {
 }
 
 
-void TabletAccMon::_TempUpdaterWakeup() {
+void Mutant::_TempUpdaterWakeup() {
   // This wakes up the waiting thread even if this is called before wait.
   // _temp_updater_wakeupnow does the magic.
   {
@@ -558,7 +572,7 @@ void TabletAccMon::_TempUpdaterWakeup() {
 // Run a cycle of temp updater and wait.  This is called when a Memtable or
 // SSTable is about to be gone.  This is not to miss any updates on them. You
 // never know if there will be a spike at the end of the lifetime.
-void TabletAccMon::_RunTempUpdaterAndWait() {
+void Mutant::_RunTempUpdaterAndWait() {
   {
     lock_guard<mutex> _(_temp_updating_mutex);
     _temp_updated = false;
@@ -582,7 +596,7 @@ void TabletAccMon::_RunTempUpdaterAndWait() {
 //
 // When you schedule a background compaction and there is no compaction to do,
 // you get "Compaction nothing to do".
-void TabletAccMon::_SstMigrationTriggererRun() {
+void Mutant::_SstMigrationTriggererRun() {
   try {
     while (! _smt_stop_requested) {
       _SstMigrationTriggererSleep();
@@ -631,7 +645,7 @@ void TabletAccMon::_SstMigrationTriggererRun() {
 }
 
 
-void TabletAccMon::_SstMigrationTriggererSleep() {
+void Mutant::_SstMigrationTriggererSleep() {
   static const auto wait_dur = chrono::milliseconds(long(SST_MIGRATION_TRIGGERER_INTERVAL_SIMULATED_TIME_SEC * 1000.0 * _simulation_over_simulated_time_dur));
   unique_lock<mutex> lk(_smt_sleep_mutex);
   _smt_sleep_cv.wait_for(lk, wait_dur, [&](){return _smt_wakeupnow;});
@@ -639,7 +653,7 @@ void TabletAccMon::_SstMigrationTriggererSleep() {
 }
 
 
-void TabletAccMon::_SstMigrationTriggererWakeup() {
+void Mutant::_SstMigrationTriggererWakeup() {
   {
     lock_guard<mutex> _(_smt_sleep_mutex);
     _smt_wakeupnow = true;
@@ -648,27 +662,35 @@ void TabletAccMon::_SstMigrationTriggererWakeup() {
 }
 
 
-void TabletAccMon::_Shutdown() {
+void Mutant::_Shutdown() {
   _smt_stop_requested = true;
   _SstMigrationTriggererWakeup();
-  _smt_thread.join();
+  if (_smt_thread) {
+    _smt_thread->join();
+    delete _smt_thread;
+    _smt_thread = nullptr;
+  }
 
   {
     lock_guard<mutex> _(_temp_updating_mutex);
     _temp_updater_stop_requested = true;
     _TempUpdaterWakeup();
   }
-  _temp_updater_thread.join();
+  if (_temp_updater_thread) {
+    _temp_updater_thread->join();
+    delete _temp_updater_thread;
+    _temp_updater_thread = nullptr;
+  }
 }
 
 
-void TabletAccMon::Init(DBImpl* db, EventLogger* el) {
-  static TabletAccMon& i = _GetInst();
-  i._Init(db, el);
+void Mutant::Init(const MutantOptions* mo, DBImpl* db, EventLogger* el) {
+  static Mutant& i = _GetInst();
+  i._Init(mo, db, el);
 }
 
 
-void TabletAccMon::MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
+void Mutant::MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
   // This is called more often than SstOpened() at least in the beginning of
   // the experiment. I think it won't be less often even when the DB restarts.
   //
@@ -696,13 +718,13 @@ void TabletAccMon::MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
   // rocksdb::DBImpl::Put(rocksdb::WriteOptions const&, rocksdb::ColumnFamilyHandle*, rocksdb::Slice const&, rocksdb::Slice const&)
   // rocksdb::DB::Put(rocksdb::WriteOptions const&, rocksdb::Slice const&, rocksdb::Slice const&)
 
-  static TabletAccMon& i = _GetInst();
+  static Mutant& i = _GetInst();
   i._MemtCreated(cfd, m);
 }
 
 
-void TabletAccMon::MemtDeleted(MemTable* m) {
-  static TabletAccMon& i = _GetInst();
+void Mutant::MemtDeleted(MemTable* m) {
+  static Mutant& i = _GetInst();
   i._MemtDeleted(m);
 }
 
@@ -714,10 +736,10 @@ void TabletAccMon::MemtDeleted(MemTable* m) {
 //
 // It is called when a SSTable is opened, created from flush and created from
 // compaction.  See the comment in BlockBasedTable::BlockBasedTable().
-void TabletAccMon::SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
+void Mutant::SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
   // TRACE << Util::StackTrace(1) << "\n";
   //
-  // rocksdb::TabletAccMon::SstOpened(rocksdb::BlockBasedTable*, rocksdb::FileDescriptor const*, int)
+  // rocksdb::Mutant::SstOpened(rocksdb::BlockBasedTable*, rocksdb::FileDescriptor const*, int)
   // rocksdb::BlockBasedTable::Open(rocksdb::ImmutableCFOptions const&, rocksdb::EnvOptions const&, rocksdb::BlockBasedTableOptions const&, rocksdb::InternalKeyComparator const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool, bool, int)
   // rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader, std::default_delete<rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescriptor const*, bool) const
   // rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&, bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*, bool, int, bool)
@@ -732,45 +754,45 @@ void TabletAccMon::SstOpened(TableReader* tr, const FileDescriptor* fd, int leve
   // rocksdb::DBImpl::BackgroundCallCompaction(void*)
   // rocksdb::ThreadPool::BGThread(unsigned long)
 
-  static TabletAccMon& i = _GetInst();
+  static Mutant& i = _GetInst();
   i._SstOpened(tr, fd, level);
 }
 
 
-void TabletAccMon::SstClosed(BlockBasedTable* bbt) {
-  static TabletAccMon& i = _GetInst();
+void Mutant::SstClosed(BlockBasedTable* bbt) {
+  static Mutant& i = _GetInst();
   i._SstClosed(bbt);
 }
 
 
-void TabletAccMon::SetUpdated() {
-  static TabletAccMon& i = _GetInst();
+void Mutant::SetUpdated() {
+  static Mutant& i = _GetInst();
   i._SetUpdated();
 }
 
 
-uint32_t TabletAccMon::CalcOutputPathId(
+uint32_t Mutant::CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
     const std::vector<FileMetaData*>& file_metadata) {
-  static TabletAccMon& i = _GetInst();
+  static Mutant& i = _GetInst();
   return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata);
 }
 
 
-uint32_t TabletAccMon::CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
-  static TabletAccMon& i = _GetInst();
+uint32_t Mutant::CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
+  static Mutant& i = _GetInst();
   return i._CalcOutputPathIdTrivialMove(fmd);
 }
 
 
-FileMetaData* TabletAccMon::PickSstForMigration(int& level_for_migration) {
-  static TabletAccMon& i = _GetInst();
+FileMetaData* Mutant::PickSstForMigration(int& level_for_migration) {
+  static Mutant& i = _GetInst();
   return i._PickSstForMigration(level_for_migration);
 }
 
 
-void TabletAccMon::Shutdown() {
-  static TabletAccMon& i = _GetInst();
+void Mutant::Shutdown() {
+  static Mutant& i = _GetInst();
   i._Shutdown();
 }
 

@@ -26,7 +26,7 @@
 #include "util/statistics.h"
 #include "util/string_util.h"
 #include "util/sync_point.h"
-#include "mutant/tablet_acc_mon.h"
+#include "mutant/mutant.h"
 
 namespace rocksdb {
 
@@ -888,7 +888,7 @@ void LevelCompactionPicker::PickFilesMarkedForCompactionExperimental(
     // doesn't have a recent snapshot, and didn't want to messup with its
     // versioning by calling SaveTo().
     int level_for_migration = -1;
-    FileMetaData* fmd = TabletAccMon::PickSstForMigration(level_for_migration);
+    FileMetaData* fmd = Mutant::PickSstForMigration(level_for_migration);
     if (fmd == nullptr) {
       // No SSTable suitable for migration
       return;
@@ -1056,7 +1056,7 @@ Compaction* LevelCompactionPicker::PickCompaction(
   // input SSTable temperature.  Mutant overrides the RocksDB default, storage
   // size limit-based placement.
 
-  uint32_t output_path_id = TabletAccMon::CalcOutputPathId(
+  uint32_t output_path_id = Mutant::CalcOutputPathId(
       temperature_triggered_single_sstable_compaction, inputs.files);
 
   // Mutant: I don't like the format of this

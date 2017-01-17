@@ -13,7 +13,7 @@
 #include "db/filename.h"
 #include "db/version_edit.h"
 
-#include "mutant/tablet_acc_mon.h"
+#include "mutant/mutant.h"
 #include "rocksdb/statistics.h"
 #include "table/internal_iterator.h"
 #include "table/iterator_wrapper.h"
@@ -165,7 +165,7 @@ Status TableCache::FindTable(const EnvOptions& env_options,
       if (s.ok()) {
         // Mutant: Limit this to the "default" CF. Do you need to? RocksDB
         // seems to store only user SSTables. Then, no.
-        TabletAccMon::SstOpened(table_reader.get(), &fd, level);
+        Mutant::SstOpened(table_reader.get(), &fd, level);
 
         // Some of the SSTables used to have level -1. Not any more after
         // updating the code in FinishCompactionOutputFile().
