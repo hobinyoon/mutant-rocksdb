@@ -1056,10 +1056,8 @@ Compaction* LevelCompactionPicker::PickCompaction(
   // input SSTable temperature.  Mutant overrides the RocksDB default, storage
   // size limit-based placement.
 
-  std::vector<std::string> input_sst_info;
   uint32_t output_path_id = TabletAccMon::CalcOutputPathId(
-      temperature_triggered_single_sstable_compaction,
-      inputs.files, input_sst_info);
+      temperature_triggered_single_sstable_compaction, inputs.files);
 
   // Mutant: I don't like the format of this
   // LogToBuffer(log_buffer, "[%s] Mutant AAA\n", cf_name.c_str());

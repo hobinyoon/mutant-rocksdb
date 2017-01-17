@@ -3497,13 +3497,15 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       for (size_t i = 0; i < c->num_input_files(l); i++) {
         FileMetaData* f = c->input(l, i);
         c->edit()->DeleteFile(c->level(l), f->fd.GetNumber());
+        // Mutant: Set output SSTable path_id based on the input SSTable
+        // temperature. I see this path is taken after implementing the
+        // temperature-triggered single-SSTable migration.
+        //
         // Looks like it follows c->input()->fd.GetPathId(). In trivial move,
         // the input and output SSTables are at different levels.
-        //
-        // Mutant: Set output SSTable path_id based on the input SSTable temperature
-        TRACE << boost::format("%d sst_id=%d path_id=%d Trivial move. Does it ever happen?\n")
-          % std::this_thread::get_id() % f->fd.GetNumber() % f->fd.GetPathId();
-        uint32_t output_path_id = TabletAccMon::CalcOutputPathId(f);
+        //TRACE << boost::format("%d sst_id=%d path_id=%d Trivial move\n")
+        //  % std::this_thread::get_id() % f->fd.GetNumber() % f->fd.GetPathId();
+        uint32_t output_path_id = TabletAccMon::CalcOutputPathIdTrivialMove(f);
 
         c->edit()->AddFile(c->output_level(), f->fd.GetNumber(),
                            //f->fd.GetPathId(),

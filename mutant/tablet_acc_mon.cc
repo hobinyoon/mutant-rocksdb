@@ -22,7 +22,7 @@ namespace rocksdb {
 //   With 2000 secs, about 55% CPU idle. I think this is good enough.
 
 // Working on multi db_paths. Let's go a bit faster.
-const double _simulation_time_dur_sec =   1500.0  ;
+const double _simulation_time_dur_sec =   2000.0  ;
 
 const double _simulated_time_dur_sec  = 1365709.587;
 const double _simulation_over_simulated_time_dur = _simulation_time_dur_sec / _simulated_time_dur_sec;
@@ -209,7 +209,7 @@ void TabletAccMon::_SstOpened(TableReader* tr, const FileDescriptor* fd, int lev
   uint64_t sst_id = fd->GetNumber();
   SstTemp* st = new SstTemp(tr, fd, level);
 
-  //TRACE << boost::format("SstOpened sst_id=%d\n") % sst_id;
+  //TRACE << boost::format("%d SstOpened sst_id=%d\n") % std::this_thread::get_id() % sst_id;
 
   auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
@@ -223,12 +223,15 @@ void TabletAccMon::_SstOpened(TableReader* tr, const FileDescriptor* fd, int lev
 
 void TabletAccMon::_SstClosed(BlockBasedTable* bbt) {
   lock_guard<mutex> lk(_sstMapLock);
+
   uint64_t sst_id = bbt->SstId();
+  //TRACE << boost::format("%d _SstClosed sst_id=%d\n") % std::this_thread::get_id() % sst_id;
+
   //TRACE << boost::format("SstClosed %d\n") % sst_id;
   auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
-    TRACE << boost::format("Hmm... Sst %d closed without having been opened\n") % sst_id;
-    //THROW("Unexpected");
+    // This happens when compaction_readahead_size is specified. Ignore.
+    //TRACE << boost::format("%d Hmm... Sst %d closed without having been opened\n") % std::this_thread::get_id() % sst_id;
   } else {
     // Update temp and report for the last time before erasing the entry.
     _RunTempUpdaterAndWait();
@@ -260,8 +263,7 @@ double TabletAccMon::_Temperature(uint64_t sst_id, const boost::posix_time::ptim
 
 uint32_t TabletAccMon::_CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
-    const std::vector<FileMetaData*>& file_metadata,
-    vector<string>& input_sst_info) {
+    const std::vector<FileMetaData*>& file_metadata) {
   if (file_metadata.size() == 0)
     THROW("Unexpected");
 
@@ -269,6 +271,7 @@ uint32_t TabletAccMon::_CalcOutputPathId(
 
   vector<double> input_sst_temp;
   vector<double> input_sst_path_id;
+  vector<string> input_sst_info;
 
   for (const auto& fmd: file_metadata) {
     uint64_t sst_id = fmd->fd.GetNumber();
@@ -324,23 +327,51 @@ uint32_t TabletAccMon::_CalcOutputPathId(
 }
 
 
-uint32_t TabletAccMon::_CalcOutputPathId(const FileMetaData* fmd) {
+// Trivial move. db/db_impl.cc:3508
+uint32_t TabletAccMon::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
   uint64_t sst_id = fmd->fd.GetNumber();
   uint32_t path_id = fmd->fd.GetPathId();
-  double temp = _Temperature(sst_id, cur_time);
-
-  TRACE << boost::format("%d Input Sst: sst_id=%d path_id=%d temp=%.3f\n")
-    % std::this_thread::get_id() % sst_id % path_id % temp;
 
   uint32_t output_path_id = path_id;
 
-  if ((temp != -1.0) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
-    output_path_id = 1;
+  // -2.0, when path_id = 1, which can be ignored.
+  double temp = -2.0;
+
+  if (path_id == 1) {
+    // Cold SSTables stay cold
+  } else {
+    temp = _Temperature(sst_id, cur_time);
+    if ((temp != -1.0) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
+      output_path_id = 1;
+    }
   }
-  TRACE << boost::format("%d Output Sst path_id=%d\n")
-    % std::this_thread::get_id() % output_path_id;
+
+  {
+    int level;
+    {
+      lock_guard<mutex> lk2(_sstMapLock2);
+      auto it = _sstMap.find(sst_id);
+      if (it == _sstMap.end())
+        THROW("Unexpected");
+      SstTemp* st = it->second;
+      level = st->Level();
+    }
+    string input_sst_info = str(boost::format("sst_id=%d level=%d path_id=%d temp=%.3f")
+        % sst_id % level % path_id % temp);
+
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_trivial_move";
+    jwriter.StartObject();
+    jwriter << "in_sst" << input_sst_info;
+    jwriter << "out_sst_path_id" << output_path_id;
+    jwriter.EndObject();
+    jwriter.EndObject();
+    _logger->Log(jwriter);
+  }
+
   return output_path_id;
 }
 
@@ -720,16 +751,15 @@ void TabletAccMon::SetUpdated() {
 
 uint32_t TabletAccMon::CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
-    const std::vector<FileMetaData*>& file_metadata,
-    vector<string>& input_sst_info) {
+    const std::vector<FileMetaData*>& file_metadata) {
   static TabletAccMon& i = _GetInst();
-  return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata, input_sst_info);
+  return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata);
 }
 
 
-uint32_t TabletAccMon::CalcOutputPathId(const FileMetaData* fmd) {
+uint32_t TabletAccMon::CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   static TabletAccMon& i = _GetInst();
-  return i._CalcOutputPathId(fmd);
+  return i._CalcOutputPathIdTrivialMove(fmd);
 }
 
 

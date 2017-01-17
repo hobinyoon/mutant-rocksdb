@@ -84,9 +84,8 @@ class TabletAccMon {
   double _Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time);
   uint32_t _CalcOutputPathId(
       bool temperature_triggered_single_sstable_compaction,
-      const std::vector<FileMetaData*>& file_metadata,
-      std::vector<std::string>& input_sst_info);
-  uint32_t _CalcOutputPathId(const FileMetaData* fmd);
+      const std::vector<FileMetaData*>& file_metadata);
+  uint32_t _CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
   FileMetaData*_PickSstForMigration(int& level_for_migration);
 
   void _TempUpdaterRun();
@@ -109,9 +108,8 @@ public:
 
   static uint32_t CalcOutputPathId(
       bool temperature_triggered_single_sstable_compaction,
-      const std::vector<FileMetaData*>& file_metadata,
-      std::vector<std::string>& input_sst_info);
-  static uint32_t CalcOutputPathId(const FileMetaData* fmd);
+      const std::vector<FileMetaData*>& file_metadata);
+  static uint32_t CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
 
   static FileMetaData* PickSstForMigration(int& level_for_migration);
 

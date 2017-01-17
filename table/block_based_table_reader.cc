@@ -423,6 +423,8 @@ struct BlockBasedTable::Rep {
 BlockBasedTable::~BlockBasedTable() {
   Close();
 
+  // Mutant: With compaction_readahead_size set, this destructor is called
+  // twice per SSTable. Interesting.
   TabletAccMon::SstClosed(this);
 
   delete rep_;
