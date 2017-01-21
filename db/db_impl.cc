@@ -5900,6 +5900,8 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
     impl->opened_successfully_ = true;
     impl->MaybeScheduleFlushOrCompaction();
 
+    mutant_options->Dump(impl->db_options_.info_log.get());
+
     // Assume Mutant is used by a single DB instance
     Mutant::Init(mutant_options, impl, &(impl->event_logger_));
   }

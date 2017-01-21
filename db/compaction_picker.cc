@@ -883,12 +883,12 @@ void LevelCompactionPicker::PickFilesMarkedForCompactionExperimental(
     // temperature-triggered compaction (migration).  Pick the coldest one that
     // are under the temperature threshold.
     //
-    // In PickSstForMigration(), we use MutantGetMetadataForFile() to get
+    // In PickColdestSstForMigration(), we use MutantGetMetadataForFile() to get
     // FileMetaData*.  Tried vstorage->files_ to get FileMetaData*, but it
     // doesn't have a recent snapshot, and didn't want to messup with its
     // versioning by calling SaveTo().
     int level_for_migration = -1;
-    FileMetaData* fmd = Mutant::PickSstForMigration(level_for_migration);
+    FileMetaData* fmd = Mutant::PickColdestSstForMigration(level_for_migration);
     if (fmd == nullptr) {
       // No SSTable suitable for migration
       return;
@@ -1052,16 +1052,15 @@ Compaction* LevelCompactionPicker::PickCompaction(
   std::vector<FileMetaData*> grandparents;
   GetGrandparents(vstorage, inputs, output_level_inputs, &grandparents);
 
-  // Mutant: Calculate the output SSTable path_id.  It is based on the average
-  // input SSTable temperature.  Mutant overrides the RocksDB default, storage
-  // size limit-based placement.
-
-  uint32_t output_path_id = Mutant::CalcOutputPathId(
-      temperature_triggered_single_sstable_compaction, inputs.files);
-
-  // Mutant: I don't like the format of this
+  // Mutant: Calculate the output SSTable path_id using the average input
+  // SSTable temperature.  Mutant overrides the RocksDB default placement,
+  // which is based on the storage size limits.
+  //
+  // Mutant does logging inside CalcOutputPathId(). I don't like the format of this
   // LogToBuffer(log_buffer, "[%s] Mutant AAA\n", cf_name.c_str());
   // 2017/01/08-23:05:48.070539 7fd970f45700 (Original Log Time 2017/01/08-23:05:48.070517) [default] Mutant AAA
+  uint32_t output_path_id = Mutant::CalcOutputPathId(
+      temperature_triggered_single_sstable_compaction, inputs.files);
 
   auto c = new Compaction(
       vstorage, mutable_cf_options, std::move(compaction_inputs), output_level,

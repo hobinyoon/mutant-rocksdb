@@ -49,8 +49,10 @@ void EventHelpers::LogAndNotifyTableFileCreationFinished(
     AppendCurrentTime(&jwriter);
     jwriter << "cf_name" << cf_name << "job" << job_id << "event"
             << "table_file_creation"
-            << "file_number" << fd.GetNumber() << "file_size"
-            << fd.GetFileSize();
+            << "file_number" << fd.GetNumber()
+            << "file_size" << fd.GetFileSize()
+            << "path_id" << fd.GetPathId()
+            ;
 
     // table_properties
     {

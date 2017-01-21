@@ -35,7 +35,7 @@ class SstTemp;
 // - When a compaction is done, updates Mutant with the creation (thus opened)
 //   of output SSTables so that Mutant can monitor.
 //
-// Which thread(?):
+// Which thread(?): TODO: Trace
 // - When an existing SSTable is open, update Mutant with the open SSTables.
 //
 // Read thread: updates SSTable access count
@@ -112,7 +112,7 @@ class Mutant {
       bool temperature_triggered_single_sstable_compaction,
       const std::vector<FileMetaData*>& file_metadata);
   uint32_t _CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
-  FileMetaData*_PickSstForMigration(int& level_for_migration);
+  FileMetaData*_PickColdestSstForMigration(int& level_for_migration);
 
   void _TempUpdaterRun();
   void _TempUpdaterSleep();
@@ -137,7 +137,7 @@ public:
       const std::vector<FileMetaData*>& file_metadata);
   static uint32_t CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
 
-  static FileMetaData* PickSstForMigration(int& level_for_migration);
+  static FileMetaData* PickColdestSstForMigration(int& level_for_migration);
 
   static void Shutdown();
 };

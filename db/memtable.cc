@@ -98,8 +98,8 @@ MemTable::MemTable(ColumnFamilyData* cfd,
         moptions_.memtable_huge_page_size, ioptions.info_log));
   }
 
-  // Mutant. We use the address for the memtable ID. I don't see anything else
-  // that can be used.
+  // Mutant. We use "this" as a key of the MemTable.
+  // We could use earliest_seqno_ as the key.
   Mutant::MemtCreated(cfd, this);
 }
 

@@ -32,6 +32,7 @@
 #include "table/block_based_table_factory.h"
 #include "util/compression.h"
 #include "util/statistics.h"
+#include "util/util.h"
 #include "util/xfunc.h"
 
 namespace rocksdb {
@@ -351,6 +352,18 @@ static const char* const access_hints[] = {
 };
 
 void DBOptions::Dump(Logger* log) const {
+  // Mutant:
+  //TRACE << boost::format("%d\n%s\n")
+  //  % std::this_thread::get_id() % Util::StackTrace(1);
+  // rocksdb::DBOptions::Dump(rocksdb::Logger*) const
+  // rocksdb::DBImpl::DBImpl(rocksdb::DBOptions const&, std::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+  // rocksdb::DB::Open(rocksdb::DBOptions const&, std::basic_string<char, std::char_traits<char>, std::allocator<char> > const&,
+  //   std::vector<rocksdb::ColumnFamilyDescriptor, std::allocator<rocksdb::ColumnFamilyDescriptor> > const&,
+  //   rocksdb::MutantOptions const*, std::vector<rocksdb::ColumnFamilyHandle*,
+  //   std::allocator<rocksdb:: ColumnFamilyHandle*> >*, rocksdb::DB**)
+  // rocksdb::DB::Open(rocksdb::Options const&, std::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, rocksdb::DB**)
+  // __libc_start_main
+
     Header(log, "         Options.error_if_exists: %d", error_if_exists);
     Header(log, "       Options.create_if_missing: %d", create_if_missing);
     Header(log, "         Options.paranoid_checks: %d", paranoid_checks);
@@ -614,6 +627,7 @@ void ColumnFamilyOptions::Dump(Logger* log) const {
            report_bg_io_stats);
 }  // ColumnFamilyOptions::Dump
 
+// Mutant: This is never called. DBOptions::Dump() is called from DBImpl::DBImpl()
 void Options::Dump(Logger* log) const {
   DBOptions::Dump(log);
   ColumnFamilyOptions::Dump(log);
@@ -836,20 +850,25 @@ ReadOptions::ReadOptions(bool cksum, bool cache)
 
 
 MutantOptions::MutantOptions()
+  : mutant_enabled(false)
+  , migrate_sstables(false)
+  , simulation_time_dur_sec(0.0)
+  , simulated_time_dur_sec(0.0)
 {
 }
 
 MutantOptions::MutantOptions(const Options& o)
   : mutant_enabled(o.mutant_enabled)
+  , migrate_sstables(o.migrate_sstables)
   , simulation_time_dur_sec(o.simulation_time_dur_sec)
   , simulated_time_dur_sec(o.simulated_time_dur_sec)
 {
 }
 
 void MutantOptions::Dump(Logger* log) const {
-  // TODO: Mutant: why is this not called?
   Header(log, "MutantOptions:");
   Header(log, "  Options.mutant_enabled: %d", mutant_enabled);
+  Header(log, "  Options.migrate_sstables: %f", migrate_sstables);
   Header(log, "  Options.simulation_time_dur_sec: %f", simulation_time_dur_sec);
   Header(log, "  Options.simulated_time_dur_sec: %f", simulated_time_dur_sec);
 }

@@ -1360,11 +1360,11 @@ struct DBOptions {
 
 
 struct MutantOptions {
-  // Mutant: TODO: Use it
   bool mutant_enabled;
+  bool migrate_sstables;
 
-  double simulation_time_dur_sec = 0.0;
-  double simulated_time_dur_sec = 0.0;
+  double simulation_time_dur_sec;
+  double simulated_time_dur_sec;
 
   // Create MutantOptions with default values for all fields
   MutantOptions();
