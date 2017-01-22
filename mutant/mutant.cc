@@ -297,8 +297,12 @@ void Mutant::_SetUpdated() {
 double Mutant::_Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time) {
   lock_guard<mutex> _(_sstMapLock2);
   auto it = _sstMap.find(sst_id);
-  if (it == _sstMap.end())
-    THROW(boost::format("Unexpected: sst_id=%d") % sst_id);
+  if (it == _sstMap.end()) {
+    //THROW(boost::format("Unexpected: sst_id=%d") % sst_id);
+    // This happens when you open an existing database and a compaction is done right away.
+    // Return -1.0, undefined.
+    return -1.0;
+  }
   SstTemp* st = it->second;
   return st->Temp(cur_time);
 }
@@ -335,10 +339,14 @@ uint32_t Mutant::_CalcOutputPathId(
     {
       lock_guard<mutex> lk2(_sstMapLock2);
       auto it = _sstMap.find(sst_id);
-      if (it == _sstMap.end())
-        THROW("Unexpected");
-      SstTemp* st = it->second;
-      level = st->Level();
+      if (it == _sstMap.end()) {
+        //THROW("Unexpected");
+        // This happens when you open an existing SSTable. Set level as undefined.
+        level = -1;
+      } else {
+        SstTemp* st = it->second;
+        level = st->Level();
+      }
     }
 
     input_sst_info.push_back(str(boost::format("(sst_id=%d level=%d path_id=%d temp=%.3f)")
@@ -403,14 +411,17 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   }
 
   {
-    int level;
+    int level = -1;
     {
       lock_guard<mutex> lk2(_sstMapLock2);
       auto it = _sstMap.find(sst_id);
-      if (it == _sstMap.end())
-        THROW("Unexpected");
-      SstTemp* st = it->second;
-      level = st->Level();
+      if (it == _sstMap.end()) {
+        //THROW("Unexpected");
+        // This happens when you open an existing db. Set level to -1.
+      } else {
+        SstTemp* st = it->second;
+        level = st->Level();
+      }
     }
     string input_sst_info = str(boost::format("sst_id=%d level=%d path_id=%d temp=%.3f")
         % sst_id % level % path_id % temp);
