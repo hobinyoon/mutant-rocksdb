@@ -18,9 +18,11 @@ namespace rocksdb {
 // 1365709.587 secs.
 double _simulation_over_simulated_time_dur = 0.0;
 
+// Default value 20.0. Will be overwritten by the user-specified option.
+double _sst_migration_temperature_threshold = 20.0;
+
 const double TEMP_UNINITIALIZED = -1.0;
 const double TEMP_DECAY_FACTOR = 0.999;
-const double SST_TEMP_BECOME_COLD_THRESHOLD = 20.0;
 const long TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME = 60;
 const long SST_MIGRATION_TRIGGERER_INTERVAL_SIMULATED_TIME_SEC = 60;
 
@@ -160,6 +162,7 @@ void Mutant::_Init(const MutantOptions* mo, DBImpl* db, EventLogger* el) {
     THROW("Unexpected");
 
   _simulation_over_simulated_time_dur = _options.simulation_time_dur_sec / _options.simulated_time_dur_sec;
+  _sst_migration_temperature_threshold = _options.sst_migration_temperature_threshold;
 
   _db = db;
   _logger = el;
@@ -349,7 +352,7 @@ uint32_t Mutant::_CalcOutputPathId(
   // output path_id accordingly.
   if (input_sst_temp.size() > 0) {
     double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
-    if (avg < SST_TEMP_BECOME_COLD_THRESHOLD) {
+    if (avg < _sst_migration_temperature_threshold) {
       output_path_id = 1;
     }
   }
@@ -394,7 +397,7 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
     // Cold SSTables stay cold
   } else {
     temp = _Temperature(sst_id, cur_time);
-    if ((temp != -1.0) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
+    if ((temp != -1.0) && (temp < _sst_migration_temperature_threshold)) {
       output_path_id = 1;
     }
   }
@@ -463,7 +466,7 @@ FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
       continue;
 
     double temp = st->Temp(cur_time);
-    if ((temp != TEMP_UNINITIALIZED) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD))
+    if ((temp != TEMP_UNINITIALIZED) && (temp < _sst_migration_temperature_threshold))
       temp_sstid[temp] = sst_id;
   }
 
@@ -671,7 +674,7 @@ void Mutant::_SstMigrationTriggererRun() {
             continue;
 
           double temp = st->Temp(cur_time);
-          if ((temp != TEMP_UNINITIALIZED) && (temp < SST_TEMP_BECOME_COLD_THRESHOLD)) {
+          if ((temp != TEMP_UNINITIALIZED) && (temp < _sst_migration_temperature_threshold)) {
             may_have_sstable_to_migrate = true;
             break;
           }

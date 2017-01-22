@@ -1363,6 +1363,8 @@ struct MutantOptions {
   bool mutant_enabled;
   bool migrate_sstables;
 
+  double sst_migration_temperature_threshold;
+
   double simulation_time_dur_sec;
   double simulated_time_dur_sec;
 
