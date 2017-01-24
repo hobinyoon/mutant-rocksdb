@@ -853,6 +853,7 @@ MutantOptions::MutantOptions()
   : mutant_enabled(false)
   , migrate_sstables(false)
   , sst_migration_temperature_threshold(20.0)
+  , cache_filter_index_at_all_levels(false)
   , simulation_time_dur_sec(0.0)
   , simulated_time_dur_sec(0.0)
 {
@@ -862,6 +863,7 @@ MutantOptions::MutantOptions(const Options& o)
   : mutant_enabled(o.mutant_enabled)
   , migrate_sstables(o.migrate_sstables)
   , sst_migration_temperature_threshold(o.sst_migration_temperature_threshold)
+  , cache_filter_index_at_all_levels(o.cache_filter_index_at_all_levels)
   , simulation_time_dur_sec(o.simulation_time_dur_sec)
   , simulated_time_dur_sec(o.simulated_time_dur_sec)
 {
@@ -872,6 +874,7 @@ void MutantOptions::Dump(Logger* log) const {
   Header(log, "  Options.mutant_enabled: %d", mutant_enabled);
   Header(log, "  Options.migrate_sstables: %f", migrate_sstables);
   Header(log, "  Options.sst_migration_temperature_threshold: %f", sst_migration_temperature_threshold);
+  Header(log, "  Options.cache_filter_index_at_all_levels: %d", cache_filter_index_at_all_levels);
   Header(log, "  Options.simulation_time_dur_sec: %f", simulation_time_dur_sec);
   Header(log, "  Options.simulated_time_dur_sec: %f", simulated_time_dur_sec);
 }

@@ -96,6 +96,8 @@ class Mutant {
 
   bool _smt_stop_requested = false;
 
+  bool _initialized = false;
+
   static Mutant& _GetInst();
 
   Mutant();
@@ -124,6 +126,8 @@ class Mutant {
 
   void _Shutdown();
 
+  MutantOptions* _Options();
+
 public:
   static void Init(const MutantOptions* mo, DBImpl* db, EventLogger* el);
   static void MemtCreated(ColumnFamilyData* cfd, MemTable* m);
@@ -140,6 +144,8 @@ public:
   static FileMetaData* PickColdestSstForMigration(int& level_for_migration);
 
   static void Shutdown();
+
+  static MutantOptions* Options();
 };
 
 }

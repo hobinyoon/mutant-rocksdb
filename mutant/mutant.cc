@@ -181,6 +181,8 @@ void Mutant::_Init(const MutantOptions* mo, DBImpl* db, EventLogger* el) {
   // Needed only with migrate_sstables
   if (_options.migrate_sstables)
     _smt_thread = new thread(bind(&rocksdb::Mutant::_SstMigrationTriggererRun, this));
+
+  _initialized = true;
 }
 
 
@@ -745,6 +747,14 @@ void Mutant::_Shutdown() {
 }
 
 
+MutantOptions* Mutant::_Options() {
+  if (_initialized)
+    return &_options;
+  else
+    return nullptr;
+}
+
+
 void Mutant::Init(const MutantOptions* mo, DBImpl* db, EventLogger* el) {
   static Mutant& i = _GetInst();
   i._Init(mo, db, el);
@@ -855,6 +865,12 @@ FileMetaData* Mutant::PickColdestSstForMigration(int& level_for_migration) {
 void Mutant::Shutdown() {
   static Mutant& i = _GetInst();
   i._Shutdown();
+}
+
+
+MutantOptions* Mutant::Options() {
+  static Mutant& i = _GetInst();
+  return i._Options();
 }
 
 }

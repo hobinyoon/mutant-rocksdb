@@ -1365,6 +1365,8 @@ struct MutantOptions {
 
   double sst_migration_temperature_threshold;
 
+  bool cache_filter_index_at_all_levels;
+
   double simulation_time_dur_sec;
   double simulated_time_dur_sec;
 
