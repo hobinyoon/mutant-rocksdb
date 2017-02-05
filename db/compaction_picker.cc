@@ -887,6 +887,8 @@ void LevelCompactionPicker::PickFilesMarkedForCompactionExperimental(
     // FileMetaData*.  Tried vstorage->files_ to get FileMetaData*, but it
     // doesn't have a recent snapshot, and didn't want to messup with its
     // versioning by calling SaveTo().
+    //
+    // Here, you don't know the output SSTable level yet.
     int level_for_migration = -1;
     FileMetaData* fmd = Mutant::PickColdestSstForMigration(level_for_migration);
     if (fmd == nullptr) {
@@ -1056,11 +1058,16 @@ Compaction* LevelCompactionPicker::PickCompaction(
   // SSTable temperature.  Mutant overrides the RocksDB default placement,
   // which is based on the storage size limits.
   //
+  // Mutant doesn't move SSTables with output_level 0, since it takes too much
+  // read requests.
+  //
   // Mutant does logging inside CalcOutputPathId(). I don't like the format of this
   // LogToBuffer(log_buffer, "[%s] Mutant AAA\n", cf_name.c_str());
   // 2017/01/08-23:05:48.070539 7fd970f45700 (Original Log Time 2017/01/08-23:05:48.070517) [default] Mutant AAA
-  uint32_t output_path_id = Mutant::CalcOutputPathId(
-      temperature_triggered_single_sstable_compaction, inputs.files);
+  uint32_t output_path_id = 0;
+  if (output_level > 0)
+    output_path_id = Mutant::CalcOutputPathId(
+        temperature_triggered_single_sstable_compaction, inputs.files);
 
   auto c = new Compaction(
       vstorage, mutable_cf_options, std::move(compaction_inputs), output_level,
