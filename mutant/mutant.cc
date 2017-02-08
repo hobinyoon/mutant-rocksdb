@@ -153,7 +153,7 @@ void Mutant::_Init(const MutantOptions* mo, DBImpl* db, EventLogger* el) {
     THROW("Unexpected");
   _options = *mo;
 
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return;
 
   if (_options.simulation_time_dur_sec == 0.0)
@@ -178,7 +178,7 @@ void Mutant::_Init(const MutantOptions* mo, DBImpl* db, EventLogger* el) {
     THROW("Unexpcted");
   _temp_updater_thread = new thread(bind(&rocksdb::Mutant::_TempUpdaterRun, this));
 
-  // Needed only with migrate_sstables
+  // _smt_thread is needed only with migrate_sstables
   if (_options.migrate_sstables)
     _smt_thread = new thread(bind(&rocksdb::Mutant::_SstMigrationTriggererRun, this));
 
@@ -187,7 +187,7 @@ void Mutant::_Init(const MutantOptions* mo, DBImpl* db, EventLogger* el) {
 
 
 void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return;
 
   lock_guard<mutex> lk(_memtSetLock);
@@ -214,7 +214,7 @@ void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
 
 
 void Mutant::_MemtDeleted(MemTable* m) {
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return;
 
   lock_guard<mutex> lk(_memtSetLock);
@@ -240,7 +240,7 @@ void Mutant::_MemtDeleted(MemTable* m) {
 
 
 void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return;
 
   lock_guard<mutex> lk(_sstMapLock);
@@ -261,7 +261,7 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
 
 
 void Mutant::_SstClosed(BlockBasedTable* bbt) {
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return;
 
   lock_guard<mutex> lk(_sstMapLock);
@@ -289,7 +289,7 @@ void Mutant::_SstClosed(BlockBasedTable* bbt) {
 
 
 void Mutant::_SetUpdated() {
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return;
 
   _updatedSinceLastOutput = true;
@@ -313,7 +313,7 @@ double Mutant::_Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur
 uint32_t Mutant::_CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
     const std::vector<FileMetaData*>& file_metadata) {
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return 0;
   if (! _options.migrate_sstables)
     return 0;
@@ -389,7 +389,7 @@ uint32_t Mutant::_CalcOutputPathId(
 uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   uint32_t path_id = fmd->fd.GetPathId();
 
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return path_id;
   if (! _options.migrate_sstables)
     return path_id;
@@ -445,7 +445,7 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
 
 // Returns nullptr when there is no SSTable for migration
 FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return nullptr;
 
   if (! _options.migrate_sstables)
@@ -704,7 +704,7 @@ void Mutant::_SstMigrationTriggererRun() {
 }
 
 
-// These 2 functions are not called when mutant_enabled = false
+// These 2 functions are not called when monitor_temp = false
 void Mutant::_SstMigrationTriggererSleep() {
   static const auto wait_dur = chrono::milliseconds(long(SST_MIGRATION_TRIGGERER_INTERVAL_SIMULATED_TIME_SEC * 1000.0 * _simulation_over_simulated_time_dur));
   unique_lock<mutex> lk(_smt_sleep_mutex);
@@ -723,7 +723,7 @@ void Mutant::_SstMigrationTriggererWakeup() {
 
 
 void Mutant::_Shutdown() {
-  if (! _options.mutant_enabled)
+  if (! _options.monitor_temp)
     return;
 
   _smt_stop_requested = true;

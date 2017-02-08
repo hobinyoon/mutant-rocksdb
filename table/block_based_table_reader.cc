@@ -672,7 +672,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
       CachableEntry<IndexReader>* index_entry = nullptr;
       MutantOptions* mo = Mutant::Options();
 
-      if (mo && mo->mutant_enabled && mo->cache_filter_index_at_all_levels) {
+      if (mo && mo->cache_filter_index_at_all_levels) {
         if (rep->table_options.pin_l0_filter_and_index_blocks_in_cache) {
           //TRACE << boost::format("%d sst_id=%d path_id=%d\n")
           //  % std::this_thread::get_id() % fd->GetNumber() % fd->GetPathId();
@@ -702,7 +702,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
         // released in the destructor only, hence it will be pinned in the
         // cache while this reader is alive
 
-        if (mo && mo->mutant_enabled && mo->cache_filter_index_at_all_levels) {
+        if (mo && mo->cache_filter_index_at_all_levels) {
           if (rep->table_options.pin_l0_filter_and_index_blocks_in_cache) {
             rep->filter_entry = filter_entry;
           } else {

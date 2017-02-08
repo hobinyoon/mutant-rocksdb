@@ -1360,12 +1360,14 @@ struct DBOptions {
 
 
 struct MutantOptions {
-  bool mutant_enabled;
+  bool cache_filter_index_at_all_levels;
+
+  // monitor tablet temperatures
+  bool monitor_temp;
+
   bool migrate_sstables;
 
   double sst_migration_temperature_threshold;
-
-  bool cache_filter_index_at_all_levels;
 
   double simulation_time_dur_sec;
   double simulated_time_dur_sec;
