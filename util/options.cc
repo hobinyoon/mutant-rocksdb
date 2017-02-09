@@ -850,20 +850,20 @@ ReadOptions::ReadOptions(bool cksum, bool cache)
 
 
 MutantOptions::MutantOptions()
-  : monitor_temp(false)
+  : cache_filter_index_at_all_levels(false)
+  , monitor_temp(false)
   , migrate_sstables(false)
   , sst_migration_temperature_threshold(20.0)
-  , cache_filter_index_at_all_levels(false)
   , simulation_time_dur_sec(0.0)
   , simulated_time_dur_sec(0.0)
 {
 }
 
 MutantOptions::MutantOptions(const Options& o)
-  : monitor_temp(o.monitor_temp)
+  : cache_filter_index_at_all_levels(o.cache_filter_index_at_all_levels)
+  , monitor_temp(o.monitor_temp)
   , migrate_sstables(o.migrate_sstables)
   , sst_migration_temperature_threshold(o.sst_migration_temperature_threshold)
-  , cache_filter_index_at_all_levels(o.cache_filter_index_at_all_levels)
   , simulation_time_dur_sec(o.simulation_time_dur_sec)
   , simulated_time_dur_sec(o.simulated_time_dur_sec)
 {
@@ -871,10 +871,10 @@ MutantOptions::MutantOptions(const Options& o)
 
 void MutantOptions::Dump(Logger* log) const {
   Header(log, "MutantOptions:");
+  Header(log, "  Options.cache_filter_index_at_all_levels: %d", cache_filter_index_at_all_levels);
   Header(log, "  Options.monitor_temp: %d", monitor_temp);
   Header(log, "  Options.migrate_sstables: %f", migrate_sstables);
   Header(log, "  Options.sst_migration_temperature_threshold: %f", sst_migration_temperature_threshold);
-  Header(log, "  Options.cache_filter_index_at_all_levels: %d", cache_filter_index_at_all_levels);
   Header(log, "  Options.simulation_time_dur_sec: %f", simulation_time_dur_sec);
   Header(log, "  Options.simulated_time_dur_sec: %f", simulated_time_dur_sec);
 }
