@@ -360,6 +360,7 @@ uint32_t Mutant::_CalcOutputPathId(
 
   // If the average input SSTable tempereture is below a threshold, set the
   // output path_id accordingly.
+  // TODO: It has to be the weighted average based on the input SSTable sizes.
   if (input_sst_temp.size() > 0) {
     double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
     if (avg < _sst_migration_temperature_threshold) {
