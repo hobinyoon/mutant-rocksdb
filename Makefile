@@ -1334,35 +1334,38 @@ ifeq ($(PLATFORM), OS_SOLARIS)
 	JAVA_INCLUDE = -I$(JAVA_HOME)/include/ -I$(JAVA_HOME)/include/solaris
 endif
 
-libz.a:
-	-rm -rf zlib-1.2.8
-	curl -O http://zlib.net/zlib-1.2.8.tar.gz
-	tar xvzf zlib-1.2.8.tar.gz
-	cd zlib-1.2.8 && CFLAGS='-fPIC' ./configure --static && make
-	cp zlib-1.2.8/libz.a .
+# Those links were broken. Installed Ubuntu packages and use the AMI.
+#   sudo apt install -y zlib1g-dev
+#   sudo apt install -y libbz2-dev
+libz.a: ;
+#	-rm -rf zlib-1.2.8
+#	curl -O http://zlib.net/zlib-1.2.8.tar.gz
+#	tar xvzf zlib-1.2.8.tar.gz
+#	cd zlib-1.2.8 && CFLAGS='-fPIC' ./configure --static && make
+#	cp zlib-1.2.8/libz.a .
 
-libbz2.a:
-	-rm -rf bzip2-1.0.6
-	curl -O  http://www.bzip.org/1.0.6/bzip2-1.0.6.tar.gz
-	tar xvzf bzip2-1.0.6.tar.gz
-	cd bzip2-1.0.6 && make CFLAGS='-fPIC -O2 -g -D_FILE_OFFSET_BITS=64'
-	cp bzip2-1.0.6/libbz2.a .
+libbz2.a: ;
+#	-rm -rf bzip2-1.0.6
+#	curl -O  http://www.bzip.org/1.0.6/bzip2-1.0.6.tar.gz
+#	tar xvzf bzip2-1.0.6.tar.gz
+#	cd bzip2-1.0.6 && make CFLAGS='-fPIC -O2 -g -D_FILE_OFFSET_BITS=64'
+#	cp bzip2-1.0.6/libbz2.a .
 
-libsnappy.a:
-	-rm -rf snappy-1.1.1
-	curl -O https://snappy.googlecode.com/files/snappy-1.1.1.tar.gz
-	tar xvzf snappy-1.1.1.tar.gz
-	cd snappy-1.1.1 && ./configure --with-pic --enable-static
-	cd snappy-1.1.1 && make
-	cp snappy-1.1.1/.libs/libsnappy.a .
+libsnappy.a: ;
+#	-rm -rf snappy-1.1.1
+#	curl -O https://snappy.googlecode.com/files/snappy-1.1.1.tar.gz
+#	tar xvzf snappy-1.1.1.tar.gz
+#	cd snappy-1.1.1 && ./configure --with-pic --enable-static
+#	cd snappy-1.1.1 && make
+#	cp snappy-1.1.1/.libs/libsnappy.a .
 
-liblz4.a:
-	   -rm -rf lz4-r127
-	   curl -O https://codeload.github.com/Cyan4973/lz4/tar.gz/r127
-	   mv r127 lz4-r127.tar.gz
-	   tar xvzf lz4-r127.tar.gz
-	   cd lz4-r127/lib && make CFLAGS='-fPIC' all
-	   cp lz4-r127/lib/liblz4.a .
+liblz4.a: ;
+#	   -rm -rf lz4-r127
+#	   curl -O https://codeload.github.com/Cyan4973/lz4/tar.gz/r127
+#	   mv r127 lz4-r127.tar.gz
+#	   tar xvzf lz4-r127.tar.gz
+#	   cd lz4-r127/lib && make CFLAGS='-fPIC' all
+#	   cp lz4-r127/lib/liblz4.a .
 
 # A version of each $(LIBOBJECTS) compiled with -fPIC and a fixed set of static compression libraries
 java_static_libobjects = $(patsubst %,jls/%,$(LIBOBJECTS))
@@ -1371,16 +1374,32 @@ CLEAN_FILES += jls
 JAVA_STATIC_FLAGS = -DZLIB -DBZIP2 -DSNAPPY -DLZ4
 JAVA_STATIC_INCLUDES = -I./zlib-1.2.8 -I./bzip2-1.0.6 -I./snappy-1.1.1 -I./lz4-r127/lib
 
-$(java_static_libobjects): jls/%.o: %.cc libz.a libbz2.a libsnappy.a liblz4.a
+$(java_static_libobjects): jls/%.o: %.cc
 	$(AM_V_CC)mkdir -p $(@D) && $(CXX) $(CXXFLAGS) $(JAVA_STATIC_FLAGS) $(JAVA_STATIC_INCLUDES) -fPIC -c $< -o $@ $(COVERAGEFLAGS)
 
-rocksdbjavastatic: $(java_static_libobjects)
+jni_native_objs = $(JNI_NATIVE_SOURCES:.cc=.o)
+
+# So rocksdbjava1 wasn't needed. Interesting.
+#$(JNI_NATIVE_SOURCES:.cc=.o):%.o:%.cc rocksdbjava1
+
+$(JNI_NATIVE_SOURCES:.cc=.o):%.o:%.cc
+	$(AM_V_at)$(CXX) $(CXXFLAGS) \
+		-I./java/. $(JAVA_INCLUDE) \
+		-I/usr/lib/jvm/java-8-openjdk-amd64/include -I/usr/lib/jvm/java-8-openjdk-amd64/include/linux \
+		-shared -fPIC -c $< $(JAVA_LDFLAGS) $(COVERAGEFLAGS) -o $@
+
+rocksdbjavastatic: $(java_static_libobjects) $(jni_native_objs)
 	cd java;$(MAKE) javalib;
 	rm -f ./java/target/$(ROCKSDBJNILIB)
-	$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC \
-	  -o ./java/target/$(ROCKSDBJNILIB) $(JNI_NATIVE_SOURCES) \
-	  $(java_static_libobjects) $(COVERAGEFLAGS) \
-	  libz.a libbz2.a libsnappy.a liblz4.a $(JAVA_STATIC_LDFLAGS)
+	$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) \
+		-I/usr/lib/jvm/java-8-openjdk-amd64/include \
+		-I/usr/lib/jvm/java-8-openjdk-amd64/include/linux \
+		-shared -fPIC \
+		-o ./java/target/$(ROCKSDBJNILIB) $(jni_native_objs) \
+		$(java_static_libobjects) $(COVERAGEFLAGS) \
+		-L/usr/lib/x86_64-linux-gnu \
+		-lz -lbz2 -lsnappy -llz4 \
+		$(JAVA_STATIC_LDFLAGS)
 	cd java/target;strip -S -x $(ROCKSDBJNILIB)
 	cd java;jar -cf target/$(ROCKSDB_JAR) HISTORY*.md
 	cd java/target;jar -uf $(ROCKSDB_JAR) $(ROCKSDBJNILIB)
@@ -1408,20 +1427,18 @@ java_libobjects = $(patsubst %,jl/%,$(LIBOBJECTS))
 CLEAN_FILES += jl
 
 $(java_libobjects): jl/%.o: %.cc
-	$(AM_V_CC)mkdir -p $(@D) && $(CXX) $(CXXFLAGS) -fPIC -c $< -o $@ $(COVERAGEFLAGS)
+	$(AM_V_CC)mmkdir -p $(@D) && $(CXX) $(CXXFLAGS) -fPIC -c $< -o $@ $(COVERAGEFLAGS)
 
 
 # Split rocksdbjava into 2 for parallel build
 .PHONY: rocksdbjava1 rocksdbjava2
 rocksdbjava: rocksdbjava1 rocksdbjava2
 
-rocksdbjava1: $(java_libobjects)
-	$(AM_V_GEN)cd java;$(MAKE) javalib;
-	$(AM_V_at)rm -f ./java/target/$(ROCKSDBJNILIB)
+rocksdbjava1: ;
 
-jni_native_objs = $(JNI_NATIVE_SOURCES:.cc=.o)
-$(JNI_NATIVE_SOURCES:.cc=.o):%.o:%.cc rocksdbjava1
-	$(AM_V_at)$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -c $< $(JAVA_LDFLAGS) $(COVERAGEFLAGS) -o $@
+#rocksdbjava1: $(java_libobjects)
+#	$(AM_V_GEN)cd java;$(MAKE) javalib;
+#	$(AM_V_at)rm -f ./java/target/$(ROCKSDBJNILIB)
 
 rocksdbjava2: rocksdbjava1 $(jni_native_objs)
 #	$(info $$JNI_NATIVE_SOURCES is [${JNI_NATIVE_SOURCES}])
