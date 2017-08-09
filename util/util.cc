@@ -428,3 +428,5 @@ void _Error::_Init() {
 const char* _Error::what() const noexcept {
 	return _what.c_str();
 }
+
+std::mutex _Error::_mutex;
