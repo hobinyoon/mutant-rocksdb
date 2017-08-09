@@ -48,9 +48,11 @@ public class NativeLibraryLoader {
    */
   public synchronized void loadLibrary(final String tmpDir) throws IOException {
     try {
+        //System.out.printf("sharedLibraryName=%s\n", sharedLibraryName);
         System.loadLibrary(sharedLibraryName);
     } catch(final UnsatisfiedLinkError ule1) {
       try {
+        //System.out.printf("jniLibraryName=%s\n", jniLibraryName);
         System.loadLibrary(jniLibraryName);
       } catch(final UnsatisfiedLinkError ule2) {
         loadLibraryFromJar(tmpDir);
@@ -75,7 +77,9 @@ public class NativeLibraryLoader {
   void loadLibraryFromJar(final String tmpDir)
       throws IOException {
     if (!initialized) {
-      System.load(loadLibraryFromJarToTemp(tmpDir).getAbsolutePath());
+      String p = loadLibraryFromJarToTemp(tmpDir).getAbsolutePath();
+      //System.out.printf("p=%s\n", p);
+      System.load(p);
       initialized = true;
     }
   }

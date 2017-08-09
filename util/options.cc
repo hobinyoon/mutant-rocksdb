@@ -870,6 +870,10 @@ MutantOptions::MutantOptions(const Options& o)
 }
 
 void MutantOptions::Dump(Logger* log) const {
+  // Feels like there is a memory stepping over bug caused from somewhere else. It appears with the TRACE below.
+  TRACE << Util::StackTrace(1) << "\n";
+  std::cout << this << " " << log << "\n";
+
   Header(log, "MutantOptions:");
   Header(log, "  Options.cache_filter_index_at_all_levels: %d", cache_filter_index_at_all_levels);
   Header(log, "  Options.monitor_temp: %d", monitor_temp);

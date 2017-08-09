@@ -35,21 +35,24 @@ public class RocksDB extends RocksObject {
     // loading possibly necessary libraries.
     for (CompressionType compressionType : CompressionType.values()) {
       try {
-        if (compressionType.getLibraryName() != null) {
-          System.loadLibrary(compressionType.getLibraryName());
+        String n = compressionType.getLibraryName();
+        if (n != null) {
+          //System.out.println(n);
+          System.loadLibrary(n);
         }
       } catch (UnsatisfiedLinkError e) {
+        //System.out.println(e);
         // since it may be optional, we ignore its loading failure here.
       }
     }
     try
     {
+      //System.out.println(tmpDir);
       NativeLibraryLoader.getInstance().loadLibrary(tmpDir);
     }
     catch (IOException e)
     {
-      throw new RuntimeException("Unable to load the RocksDB shared library"
-          + e);
+      throw new RuntimeException(String.format("%s. Unable to load the RocksDB shared library [%s]", e, tmpDir));
     }
   }
 
