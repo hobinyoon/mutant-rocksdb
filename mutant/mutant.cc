@@ -768,9 +768,10 @@ void Mutant::MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
   //
   //TRACE << boost::format("%d cfd=%p cfd_name=%s\n") % std::this_thread::get_id() % cfd % cfd->GetName();
 
-  if (cfd->GetName() != "default") {
-    // Are there any CF other than the user-provided, "default"? If not,
-    // monitoring becomes a bit easier.  Cassandra has system CF.
+  const auto cfd_name = cfd->GetName();
+  if (cfd_name != "default" && cfd_name != "usertable") {
+    // Just checking if there are any other CFs other than the user-provided ones cause Cassandra has system CFs.
+    //   quizup uses default. YCSB uses usertable.
     TRACE << boost::format("%d Interesting! cfd=%p cfd_name=%s\n")
       % std::this_thread::get_id() % cfd % cfd->GetName();
     return;
