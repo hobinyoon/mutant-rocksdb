@@ -32,6 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include <boost/format.hpp>
+
 #include "db/auto_roll_logger.h"
 #include "db/builder.h"
 #include "db/compaction_job.h"
@@ -5892,10 +5894,16 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
     impl->opened_successfully_ = true;
     impl->MaybeScheduleFlushOrCompaction();
 
-    db_options.DumpMutantOptions(impl->db_options_.info_log.get());
+    try {
+      db_options.DumpMutantOptions(impl->db_options_.info_log.get());
 
-    // Assume Mutant is used by a single DB instance
-    Mutant::Init(&(db_options.mutant_options), impl, &(impl->event_logger_));
+      // Assume Mutant is used by a single DB instance, which makes sense cause it's an embedded DB.
+      Mutant::Init(&(db_options.mutant_options), impl, &(impl->event_logger_));
+    } catch (const std::runtime_error& e) {
+      std::string str = std::string("Mutant Exception: ") + e.what();
+      std::cerr << str << "\n";
+      s = Status::InvalidArgument(str);
+    }
   }
   impl->mutex_.Unlock();
 
