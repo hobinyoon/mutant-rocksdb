@@ -48,7 +48,7 @@ class SstTemp;
 //   triggers migration.
 
 class Mutant {
-  MutantOptions _options;
+  const DBOptions::MutantOptions* _options;
   DBImpl* _db = nullptr;
   EventLogger* _logger = nullptr;
   ColumnFamilyData* _cfd = nullptr;
@@ -102,7 +102,7 @@ class Mutant {
 
   Mutant();
 
-  void _Init(const MutantOptions* mo, DBImpl* db, EventLogger* el);
+  void _Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* el);
   void _MemtCreated(ColumnFamilyData* cfd, MemTable* m);
   void _MemtDeleted(MemTable* m);
   void _SstOpened(TableReader* tr, const FileDescriptor* fd, int level);
@@ -126,10 +126,10 @@ class Mutant {
 
   void _Shutdown();
 
-  MutantOptions* _Options();
+  const DBOptions::MutantOptions* _Options();
 
 public:
-  static void Init(const MutantOptions* mo, DBImpl* db, EventLogger* el);
+  static void Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* el);
   static void MemtCreated(ColumnFamilyData* cfd, MemTable* m);
   static void MemtDeleted(MemTable* m);
   static void SstOpened(TableReader* tr, const FileDescriptor* fd, int level);
@@ -145,7 +145,7 @@ public:
 
   static void Shutdown();
 
-  static MutantOptions* Options();
+  static const DBOptions::MutantOptions* Options();
 };
 
 }

@@ -670,7 +670,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
       // to NewIndexIterator(), which will save the index block in there
       // else it's a nullptr and nothing special happens
       CachableEntry<IndexReader>* index_entry = nullptr;
-      MutantOptions* mo = Mutant::Options();
+      const DBOptions::MutantOptions* mo = Mutant::Options();
 
       if (mo && mo->cache_filter_index_at_all_levels) {
         if (rep->table_options.pin_l0_filter_and_index_blocks_in_cache) {

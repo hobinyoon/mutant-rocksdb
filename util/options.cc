@@ -483,7 +483,20 @@ void DBOptions::Dump(Logger* log) const {
 #endif  // ROCKDB_LITE
     Header(log, "                    Options.avoid_flush_during_recovery: %d",
            avoid_flush_during_recovery);
+
+    DumpMutantOptions(log);
 }  // DBOptions::Dump
+
+void DBOptions::DumpMutantOptions(Logger* log) const {
+  Header(log, "MutantOptions");
+  Header(log, "  cache_filter_index_at_all_levels: %d", mutant_options.cache_filter_index_at_all_levels);
+  Header(log, "  monitor_temp: %d", mutant_options.monitor_temp);
+  Header(log, "  migrate_sstables: %f", mutant_options.migrate_sstables);
+  Header(log, "  sst_migration_temperature_threshold: %f", mutant_options.sst_migration_temperature_threshold);
+  Header(log, "  simulation_time_dur_sec: %f", mutant_options.simulation_time_dur_sec);
+  Header(log, "  simulated_time_dur_sec: %f", mutant_options.simulated_time_dur_sec);
+}
+
 
 void ColumnFamilyOptions::Dump(Logger* log) const {
   Header(log, "              Options.comparator: %s", comparator->Name());
@@ -631,7 +644,6 @@ void ColumnFamilyOptions::Dump(Logger* log) const {
 void Options::Dump(Logger* log) const {
   DBOptions::Dump(log);
   ColumnFamilyOptions::Dump(log);
-  MutantOptions::Dump(log);
 }   // Options::Dump
 
 void Options::DumpCFOptions(Logger* log) const {
@@ -849,7 +861,7 @@ ReadOptions::ReadOptions(bool cksum, bool cache)
 }
 
 
-MutantOptions::MutantOptions()
+DBOptions::MutantOptions::MutantOptions()
   : cache_filter_index_at_all_levels(false)
   , monitor_temp(false)
   , migrate_sstables(false)
@@ -858,29 +870,4 @@ MutantOptions::MutantOptions()
   , simulated_time_dur_sec(0.0)
 {
 }
-
-MutantOptions::MutantOptions(const Options& o)
-  : cache_filter_index_at_all_levels(o.cache_filter_index_at_all_levels)
-  , monitor_temp(o.monitor_temp)
-  , migrate_sstables(o.migrate_sstables)
-  , sst_migration_temperature_threshold(o.sst_migration_temperature_threshold)
-  , simulation_time_dur_sec(o.simulation_time_dur_sec)
-  , simulated_time_dur_sec(o.simulated_time_dur_sec)
-{
-}
-
-void MutantOptions::Dump(Logger* log) const {
-  // Feels like there is a memory stepping over bug caused from somewhere else. It appears with the TRACE below.
-  TRACE << Util::StackTrace(1) << "\n";
-  std::cout << this << " " << log << "\n";
-
-  Header(log, "MutantOptions:");
-  Header(log, "  Options.cache_filter_index_at_all_levels: %d", cache_filter_index_at_all_levels);
-  Header(log, "  Options.monitor_temp: %d", monitor_temp);
-  Header(log, "  Options.migrate_sstables: %f", migrate_sstables);
-  Header(log, "  Options.sst_migration_temperature_threshold: %f", sst_migration_temperature_threshold);
-  Header(log, "  Options.simulation_time_dur_sec: %f", simulation_time_dur_sec);
-  Header(log, "  Options.simulated_time_dur_sec: %f", simulated_time_dur_sec);
-}
-
 }  // namespace rocksdb

@@ -229,6 +229,15 @@ public class RocksDB extends RocksObject {
       final List<ColumnFamilyDescriptor> columnFamilyDescriptors,
       final List<ColumnFamilyHandle> columnFamilyHandles)
       throws RocksDBException {
+    // Thread.dumpStack();
+    //
+    // RocksDB JNI
+    //   org.rocksdb.RocksDB.open(RocksDB.java:233)
+    // YCSB RocksDB binding
+    //   com.yahoo.ycsb.db.RocksDBClient.init(RocksDBClient.java:107)
+    //   com.yahoo.ycsb.DBWrapper.init(DBWrapper.java:99)
+    //   com.yahoo.ycsb.ClientThread.run(Client.java:430)
+    //   java.lang.Thread.run(Thread.java:748)
 
     final byte[][] cfNames = new byte[columnFamilyDescriptors.size()][];
     final long[] cfOptionHandles = new long[columnFamilyDescriptors.size()];

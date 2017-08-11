@@ -1229,6 +1229,7 @@ struct DBOptions {
   explicit DBOptions(const Options& options);
 
   void Dump(Logger* log) const;
+  void DumpMutantOptions(Logger* log) const;
 
   // Allows OS to incrementally sync files to disk while they are being
   // written, asynchronously, in the background. This operation can be used
@@ -1356,34 +1357,30 @@ struct DBOptions {
   //
   // DEFAULT: false
   bool avoid_flush_during_recovery;
-};
 
+  struct MutantOptions {
+    bool cache_filter_index_at_all_levels;
 
-struct MutantOptions {
-  bool cache_filter_index_at_all_levels;
+    // monitor tablet temperatures
+    bool monitor_temp;
 
-  // monitor tablet temperatures
-  bool monitor_temp;
+    bool migrate_sstables;
 
-  bool migrate_sstables;
+    double sst_migration_temperature_threshold;
 
-  double sst_migration_temperature_threshold;
+    double simulation_time_dur_sec;
+    double simulated_time_dur_sec;
 
-  double simulation_time_dur_sec;
-  double simulated_time_dur_sec;
+    // Create MutantOptions with default values for all fields
+    MutantOptions();
+  };
 
-  // Create MutantOptions with default values for all fields
-  MutantOptions();
-
-  // Create MutantOptions from Options
-  explicit MutantOptions(const Options& options);
-
-  void Dump(Logger* log) const;
+  MutantOptions mutant_options;
 };
 
 
 // Options to control the behavior of a database (passed to DB::Open)
-struct Options : public DBOptions, public ColumnFamilyOptions, public MutantOptions {
+struct Options : public DBOptions, public ColumnFamilyOptions {
   // Create an Options object with default values for all fields.
   Options() : DBOptions(), ColumnFamilyOptions() {}
 

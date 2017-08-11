@@ -533,6 +533,13 @@ public class DBOptions extends RocksObject implements DBOptionsInterface {
     return bytesPerSync(nativeHandle_);
   }
 
+  public DBOptions setMutantMonitorTemp(
+      final boolean monitor) {
+    assert(isOwningHandle());
+    setMutantMonitorTemp(nativeHandle_, monitor);
+    return this;
+  }
+
   static final int DEFAULT_NUM_SHARD_BITS = -1;
 
   /**
@@ -638,6 +645,10 @@ public class DBOptions extends RocksObject implements DBOptionsInterface {
   private native void setBytesPerSync(
       long handle, long bytesPerSync);
   private native long bytesPerSync(long handle);
+
+  // Mutant options
+  private native void setMutantMonitorTemp(
+      long handle, boolean monitor);
 
   int numShardBits_;
   RateLimiterConfig rateLimiterConfig_;
