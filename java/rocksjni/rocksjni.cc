@@ -131,6 +131,64 @@ jlongArray rocksdb_open_helper(JNIEnv* env, jlong jopt_handle,
   }
 }
 
+jlongArray rocksdb_open1_helper(JNIEnv* env, jlong jopt_handle,
+    jstring jdb_path, jobjectArray jcolumn_names, jlongArray jcolumn_options,
+    std::function<rocksdb::Status(
+      const rocksdb::Options&, const std::string&,
+      const std::vector<rocksdb::ColumnFamilyDescriptor>&,
+      std::vector<rocksdb::ColumnFamilyHandle*>*,
+      rocksdb::DB**)> open_fn
+    ) {
+  auto* opt = reinterpret_cast<rocksdb::Options*>(jopt_handle);
+  const char* db_path = env->GetStringUTFChars(jdb_path, NULL);
+
+  std::vector<rocksdb::ColumnFamilyDescriptor> column_families;
+
+  jsize len_cols = env->GetArrayLength(jcolumn_names);
+  jlong* jco = env->GetLongArrayElements(jcolumn_options, NULL);
+  for(int i = 0; i < len_cols; i++) {
+    jobject jcn = env->GetObjectArrayElement(jcolumn_names, i);
+    jbyteArray jcn_ba = reinterpret_cast<jbyteArray>(jcn);
+    jbyte* jcf_name = env->GetByteArrayElements(jcn_ba, NULL);
+    const int jcf_name_len = env->GetArrayLength(jcn_ba);
+
+    //TODO(AR) do I need to make a copy of jco[i] ?
+
+    std::string cf_name (reinterpret_cast<char *>(jcf_name), jcf_name_len);
+    rocksdb::ColumnFamilyOptions* cf_options =
+      reinterpret_cast<rocksdb::ColumnFamilyOptions*>(jco[i]);
+    column_families.push_back(
+      rocksdb::ColumnFamilyDescriptor(cf_name, *cf_options));
+
+    env->ReleaseByteArrayElements(jcn_ba, jcf_name, JNI_ABORT);
+    env->DeleteLocalRef(jcn);
+  }
+  env->ReleaseLongArrayElements(jcolumn_options, jco, JNI_ABORT);
+
+  std::vector<rocksdb::ColumnFamilyHandle*> handles;
+  rocksdb::DB* db = nullptr;
+  rocksdb::Status s = open_fn(*opt, db_path, column_families,
+      &handles, &db);
+
+  // check if open operation was successful
+  if (s.ok()) {
+    jsize resultsLen = 1 + len_cols; //db handle + column family handles
+    std::unique_ptr<jlong[]> results =
+        std::unique_ptr<jlong[]>(new jlong[resultsLen]);
+    results[0] = reinterpret_cast<jlong>(db);
+    for(int i = 1; i <= len_cols; i++) {
+      results[i] = reinterpret_cast<jlong>(handles[i - 1]);
+    }
+
+    jlongArray jresults = env->NewLongArray(resultsLen);
+    env->SetLongArrayRegion(jresults, 0, resultsLen, results.get());
+    return jresults;
+  } else {
+    rocksdb::RocksDBExceptionJni::ThrowNew(env, s);
+    return NULL;
+  }
+}
+
 /*
  * Class:     org_rocksdb_RocksDB
  * Method:    openROnly
@@ -169,9 +227,9 @@ jlongArray Java_org_rocksdb_RocksDB_open__JLjava_lang_String_2_3_3B_3J(
 jlongArray Java_org_rocksdb_RocksDB_open1 (
     JNIEnv* env, jclass jcls, jlong jopt_handle, jstring jdb_path,
     jobjectArray jcolumn_names, jlongArray jcolumn_options) {
-  return rocksdb_open_helper(env, jopt_handle, jdb_path, jcolumn_names,
+  return rocksdb_open1_helper(env, jopt_handle, jdb_path, jcolumn_names,
     jcolumn_options, (rocksdb::Status(*)
-      (const rocksdb::DBOptions&, const std::string&,
+      (const rocksdb::Options&, const std::string&,
         const std::vector<rocksdb::ColumnFamilyDescriptor>&,
         std::vector<rocksdb::ColumnFamilyHandle*>*, rocksdb::DB**)
       )&rocksdb::DB::Open1

@@ -260,7 +260,7 @@ public class RocksDB extends RocksObject {
     return db;
   }
 
-  public static RocksDB open1(final DBOptions options, final String path,
+  public static RocksDB open1(final Options options, final String path,
       final List<ColumnFamilyDescriptor> columnFamilyDescriptors,
       final List<ColumnFamilyHandle> columnFamilyHandles)
       throws RocksDBException {
