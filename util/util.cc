@@ -251,7 +251,7 @@ namespace Util {
 			string m1(boost::trim_copy(string(messages[i])));
 			boost::split(t, m1, sep, boost::token_compress_off);
 			if (t.size() != 6) {
-        std::cerr << boost::format("%s %d Unexpected format: %s\nt.size()=%d\nt=[%s]")
+        std::cout << boost::format("%s %d Unexpected format: %s\nt.size()=%d\nt=[%s]")
 							% __FILE__ % __LINE__ % messages[i] % t.size() % boost::join(t, "\n");
         continue;
 			}
@@ -264,7 +264,7 @@ namespace Util {
 				vector<string> t1;
 				boost::split(t1, t[1], sep1);
 				if (t1.size() != 2) {
-          std::cerr << boost::format("%s %d Unexpected format: %s\nt1.size()=%d\nt1=[%s]")
+          std::cout << boost::format("%s %d Unexpected format: %s\nt1.size()=%d\nt1=[%s]")
                 % __FILE__ % __LINE__ % messages[i] % t1.size() % boost::join(t1, "\n");
           continue;
 				}
