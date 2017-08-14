@@ -32,76 +32,82 @@
  */
 jbyteArray Java_org_rocksdb_WriteBatchTest_getContents(
     JNIEnv* env, jclass jclazz, jlong jwb_handle) {
-  //auto* b = reinterpret_cast<rocksdb::WriteBatch*>(jwb_handle);
-  //assert(b != nullptr);
+	// Not sure of the first parameter to MemTable(). We don't need it for now.
+	std::cout << "Unexpected\n";
+	exit(1);
 
-  //// todo: Currently the following code is directly copied from
-  //// db/write_bench_test.cc.  It could be implemented in java once
-  //// all the necessary components can be accessed via jni api.
+#if 0
+  auto* b = reinterpret_cast<rocksdb::WriteBatch*>(jwb_handle);
+  assert(b != nullptr);
 
-  //rocksdb::InternalKeyComparator cmp(rocksdb::BytewiseComparator());
-  //auto factory = std::make_shared<rocksdb::SkipListFactory>();
-  //rocksdb::Options options;
-  //rocksdb::WriteBufferManager wb(options.db_write_buffer_size);
-  //options.memtable_factory = factory;
-  //rocksdb::MemTable* mem = new rocksdb::MemTable(
-  //    cmp,
-  //    rocksdb::ImmutableCFOptions(options),
-  //    rocksdb::MutableCFOptions(options, rocksdb::ImmutableCFOptions(options)),
-  //    &wb, rocksdb::kMaxSequenceNumber);
-  //mem->Ref();
+  // todo: Currently the following code is directly copied from
+  // db/write_bench_test.cc.  It could be implemented in java once
+  // all the necessary components can be accessed via jni api.
+
+  rocksdb::InternalKeyComparator cmp(rocksdb::BytewiseComparator());
+  auto factory = std::make_shared<rocksdb::SkipListFactory>();
+  rocksdb::Options options;
+  rocksdb::WriteBufferManager wb(options.db_write_buffer_size);
+  options.memtable_factory = factory;
+
+
+  rocksdb::MemTable* mem = new rocksdb::MemTable(
+      cmp, rocksdb::ImmutableCFOptions(options),
+      rocksdb::MutableCFOptions(options, rocksdb::ImmutableCFOptions(options)),
+      &wb, rocksdb::kMaxSequenceNumber);
+  mem->Ref();
   std::string state;
-  //rocksdb::ColumnFamilyMemTablesDefault cf_mems_default(mem);
-  //rocksdb::Status s =
-  //    rocksdb::WriteBatchInternal::InsertInto(b, &cf_mems_default, nullptr);
-  //int count = 0;
-  //rocksdb::Arena arena;
-  //rocksdb::ScopedArenaIterator iter(mem->NewIterator(
-  //    rocksdb::ReadOptions(), &arena));
-  //for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
-  //  rocksdb::ParsedInternalKey ikey;
-  //  memset(reinterpret_cast<void*>(&ikey), 0, sizeof(ikey));
-  //  bool parsed = rocksdb::ParseInternalKey(iter->key(), &ikey);
-  //  assert(parsed);
-  //  switch (ikey.type) {
-  //    case rocksdb::kTypeValue:
-  //      state.append("Put(");
-  //      state.append(ikey.user_key.ToString());
-  //      state.append(", ");
-  //      state.append(iter->value().ToString());
-  //      state.append(")");
-  //      count++;
-  //      break;
-  //    case rocksdb::kTypeMerge:
-  //      state.append("Merge(");
-  //      state.append(ikey.user_key.ToString());
-  //      state.append(", ");
-  //      state.append(iter->value().ToString());
-  //      state.append(")");
-  //      count++;
-  //      break;
-  //    case rocksdb::kTypeDeletion:
-  //      state.append("Delete(");
-  //      state.append(ikey.user_key.ToString());
-  //      state.append(")");
-  //      count++;
-  //      break;
-  //    default:
-  //      assert(false);
-  //      break;
-  //  }
-  //  state.append("@");
-  //  state.append(rocksdb::NumberToString(ikey.sequence));
-  //}
-  //if (!s.ok()) {
-  //  state.append(s.ToString());
-  //} else if (count != rocksdb::WriteBatchInternal::Count(b)) {
-  //  state.append("CountMismatch()");
-  //}
-  //delete mem->Unref();
+  rocksdb::ColumnFamilyMemTablesDefault cf_mems_default(mem);
+  rocksdb::Status s =
+      rocksdb::WriteBatchInternal::InsertInto(b, &cf_mems_default, nullptr);
+  int count = 0;
+  rocksdb::Arena arena;
+  rocksdb::ScopedArenaIterator iter(mem->NewIterator(
+      rocksdb::ReadOptions(), &arena));
+  for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
+    rocksdb::ParsedInternalKey ikey;
+    memset(reinterpret_cast<void*>(&ikey), 0, sizeof(ikey));
+    bool parsed = rocksdb::ParseInternalKey(iter->key(), &ikey);
+    assert(parsed);
+    switch (ikey.type) {
+      case rocksdb::kTypeValue:
+        state.append("Put(");
+        state.append(ikey.user_key.ToString());
+        state.append(", ");
+        state.append(iter->value().ToString());
+        state.append(")");
+        count++;
+        break;
+      case rocksdb::kTypeMerge:
+        state.append("Merge(");
+        state.append(ikey.user_key.ToString());
+        state.append(", ");
+        state.append(iter->value().ToString());
+        state.append(")");
+        count++;
+        break;
+      case rocksdb::kTypeDeletion:
+        state.append("Delete(");
+        state.append(ikey.user_key.ToString());
+        state.append(")");
+        count++;
+        break;
+      default:
+        assert(false);
+        break;
+    }
+    state.append("@");
+    state.append(rocksdb::NumberToString(ikey.sequence));
+  }
+  if (!s.ok()) {
+    state.append(s.ToString());
+  } else if (count != rocksdb::WriteBatchInternal::Count(b)) {
+    state.append("CountMismatch()");
+  }
+  delete mem->Unref();
+#endif
 
-  state.append("Not implemented");
-
+  std::string state;
   jbyteArray jstate = env->NewByteArray(static_cast<jsize>(state.size()));
   env->SetByteArrayRegion(jstate, 0, static_cast<jsize>(state.size()),
                           reinterpret_cast<const jbyte*>(state.c_str()));
