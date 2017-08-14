@@ -166,12 +166,14 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
 
   _db = db;
   _logger = el;
+  if (! _logger)
+    THROW("Unexpcted");
 
-  JSONWriter jwriter;
-  EventHelpers::AppendCurrentTime(&jwriter);
-  jwriter << "mutant_initialized";
-  jwriter.EndObject();
-  _logger->Log(jwriter);
+	JSONWriter jwriter;
+	EventHelpers::AppendCurrentTime(&jwriter);
+	jwriter << "mutant_initialized";
+	jwriter.EndObject();
+	_logger->Log(jwriter);
 
   // Let the threads start here! In the constructor, some of the members are not set yet.
   if (_temp_updater_thread)
@@ -187,6 +189,8 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
 
 
 void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
+	if (! _initialized)
+		return;
   if (_options == nullptr || ! _options->monitor_temp)
     return;
 
@@ -214,6 +218,8 @@ void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
 
 
 void Mutant::_MemtDeleted(MemTable* m) {
+	if (! _initialized)
+		return;
   if (_options == nullptr || ! _options->monitor_temp)
     return;
 
@@ -240,6 +246,8 @@ void Mutant::_MemtDeleted(MemTable* m) {
 
 
 void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
+	if (! _initialized)
+		return;
   if (_options == nullptr || ! _options->monitor_temp)
     return;
 
@@ -261,6 +269,8 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
 
 
 void Mutant::_SstClosed(BlockBasedTable* bbt) {
+	if (! _initialized)
+		return;
   if (_options == nullptr || ! _options->monitor_temp)
     return;
 
@@ -289,6 +299,8 @@ void Mutant::_SstClosed(BlockBasedTable* bbt) {
 
 
 void Mutant::_SetUpdated() {
+	if (! _initialized)
+		return;
   if (_options == nullptr || ! _options->monitor_temp)
     return;
 
@@ -313,6 +325,9 @@ double Mutant::_Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur
 uint32_t Mutant::_CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
     const std::vector<FileMetaData*>& file_metadata) {
+	if (! _initialized)
+		return 0;
+
   if (_options == nullptr || ! _options->monitor_temp)
     return 0;
   if (! _options->migrate_sstables)
@@ -390,6 +405,8 @@ uint32_t Mutant::_CalcOutputPathId(
 uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   uint32_t path_id = fmd->fd.GetPathId();
 
+	if (! _initialized)
+		return path_id;
   if (_options == nullptr || ! _options->monitor_temp)
     return path_id;
   if (! _options->migrate_sstables)
@@ -446,6 +463,8 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
 
 // Returns nullptr when there is no SSTable for migration
 FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
+	if (! _initialized)
+		return nullptr;
   if (_options == nullptr || ! _options->monitor_temp)
     return nullptr;
 
@@ -577,7 +596,7 @@ void Mutant::_TempUpdaterRun() {
 
           // Output to the rocksdb log. The condition is just to reduce
           // memt-only logs. So not all memt stats are reported, which is okay.
-          if (sst_stat_str.size() > 0) {
+          if ((sst_stat_str.size() > 0) && (_logger != nullptr)) {
             JSONWriter jwriter;
             EventHelpers::AppendCurrentTime(&jwriter);
             jwriter << "mutant_table_acc_cnt";
