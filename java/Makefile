@@ -138,9 +138,9 @@ javadocs:
 	$(AM_V_GEN)mkdir -p $(JAVADOC)
 	$(AM_V_at)javadoc -d $(JAVADOC) -sourcepath $(MAIN_SRC) -subpackages org
 
-# Saves time
 #javalib: java java_test javadocs
-javalib: java
+# Save build time
+javalib: java java_test
 
 java:
 	$(AM_V_GEN)mkdir -p $(MAIN_CLASSES)
