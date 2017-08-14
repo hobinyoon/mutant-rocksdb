@@ -166,6 +166,18 @@ jlongArray Java_org_rocksdb_RocksDB_open__JLjava_lang_String_2_3_3B_3J(
     );
 }
 
+jlongArray Java_org_rocksdb_RocksDB_open1 (
+    JNIEnv* env, jclass jcls, jlong jopt_handle, jstring jdb_path,
+    jobjectArray jcolumn_names, jlongArray jcolumn_options) {
+  return rocksdb_open_helper(env, jopt_handle, jdb_path, jcolumn_names,
+    jcolumn_options, (rocksdb::Status(*)
+      (const rocksdb::DBOptions&, const std::string&,
+        const std::vector<rocksdb::ColumnFamilyDescriptor>&,
+        std::vector<rocksdb::ColumnFamilyHandle*>*, rocksdb::DB**)
+      )&rocksdb::DB::Open1
+    );
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // rocksdb::DB::ListColumnFamilies
 

@@ -133,14 +133,13 @@ clean:
 	$(AM_V_at)rm -rf $(BENCHMARK_OUTPUT)
 	$(AM_V_at)rm -rf $(SAMPLES_OUTPUT)
 
-
-javadocs:
-	$(AM_V_GEN)mkdir -p $(JAVADOC)
-	$(AM_V_at)javadoc -d $(JAVADOC) -sourcepath $(MAIN_SRC) -subpackages org
-
-#javalib: java java_test javadocs
 # Save build time
-javalib: java java_test
+javadocs: ;
+# javadocs:
+# 	$(AM_V_GEN)mkdir -p $(JAVADOC)
+# 	$(AM_V_at)javadoc -d $(JAVADOC) -sourcepath $(MAIN_SRC) -subpackages org
+
+javalib: java java_test javadocs
 
 java:
 	$(AM_V_GEN)mkdir -p $(MAIN_CLASSES)

@@ -5749,6 +5749,13 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   return s;
 }
 
+Status DB::Open1(const DBOptions& db_options, const std::string& dbname,
+                const std::vector<ColumnFamilyDescriptor>& column_families,
+                std::vector<ColumnFamilyHandle*>* handles, DB** dbptr) {
+  //TRACE << "\n";
+	return Open(db_options, dbname, column_families, handles, dbptr);
+}
+
 Status DB::Open(const DBOptions& db_options, const std::string& dbname,
                 const std::vector<ColumnFamilyDescriptor>& column_families,
                 std::vector<ColumnFamilyHandle*>* handles, DB** dbptr) {

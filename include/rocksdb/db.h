@@ -153,6 +153,9 @@ class DB {
   static Status Open(const DBOptions& db_options, const std::string& name,
                      const std::vector<ColumnFamilyDescriptor>& column_families,
                      std::vector<ColumnFamilyHandle*>* handles, DB** dbptr);
+  static Status Open1(const DBOptions& db_options, const std::string& name,
+                     const std::vector<ColumnFamilyDescriptor>& column_families,
+                     std::vector<ColumnFamilyHandle*>* handles, DB** dbptr);
 
   // ListColumnFamilies will open the DB specified by argument name
   // and return the list of all column families in that DB

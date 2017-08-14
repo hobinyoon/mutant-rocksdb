@@ -260,6 +260,33 @@ public class RocksDB extends RocksObject {
     return db;
   }
 
+  public static RocksDB open1(final DBOptions options, final String path,
+      final List<ColumnFamilyDescriptor> columnFamilyDescriptors,
+      final List<ColumnFamilyHandle> columnFamilyHandles)
+      throws RocksDBException {
+    //Thread.dumpStack();
+
+    final byte[][] cfNames = new byte[columnFamilyDescriptors.size()][];
+    final long[] cfOptionHandles = new long[columnFamilyDescriptors.size()];
+    for (int i = 0; i < columnFamilyDescriptors.size(); i++) {
+      final ColumnFamilyDescriptor cfDescriptor = columnFamilyDescriptors
+          .get(i);
+      cfNames[i] = cfDescriptor.columnFamilyName();
+      cfOptionHandles[i] = cfDescriptor.columnFamilyOptions().nativeHandle_;
+    }
+
+    final long[] handles = open1(options.nativeHandle_, path, cfNames,
+        cfOptionHandles);
+    final RocksDB db = new RocksDB(handles[0]);
+    db.storeOptionsInstance(options);
+
+    for (int i = 1; i < handles.length; i++) {
+      columnFamilyHandles.add(new ColumnFamilyHandle(db, handles[i]));
+    }
+
+    return db;
+  }
+
   /**
    * The factory constructor of RocksDB that opens a RocksDB instance in
    * Read-Only mode given the path to the database using the default
@@ -1756,6 +1783,10 @@ public class RocksDB extends RocksObject {
    * @throws RocksDBException thrown if the database could not be opened
    */
   protected native static long[] open(final long optionsHandle,
+      final String path, final byte[][] columnFamilyNames,
+      final long[] columnFamilyOptions) throws RocksDBException;
+
+  protected native static long[] open1(final long optionsHandle,
       final String path, final byte[][] columnFamilyNames,
       final long[] columnFamilyOptions) throws RocksDBException;
 
