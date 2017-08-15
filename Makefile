@@ -1343,14 +1343,17 @@ JAVA_STATIC_INCLUDES = -I./zlib-1.2.8 -I./bzip2-1.0.6 -I./snappy-1.1.1 -I./lz4-r
 $(java_static_libobjects): jls/%.o: %.cc
 	$(AM_V_CC)mkdir -p $(@D) && $(CXX) $(CXXFLAGS) $(JAVA_STATIC_FLAGS) $(JAVA_STATIC_INCLUDES) -fPIC -c $< -o $@ $(COVERAGEFLAGS)
 
-rocksdbjavastatic: $(java_static_libobjects)
+make_javalib:
 	cd java;$(MAKE) javalib;
+
+jni_native_objs = $(JNI_NATIVE_SOURCES:.cc=.o)
+
+rocksdbjavastatic: $(java_static_libobjects) make_javalib $(jni_native_objs)
 	rm -f ./java/target/$(ROCKSDBJNILIB)
 	$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC \
-		-o ./java/target/$(ROCKSDBJNILIB) $(JNI_NATIVE_SOURCES) \
+		-o ./java/target/$(ROCKSDBJNILIB) $(jni_native_objs) \
 		$(java_static_libobjects) $(COVERAGEFLAGS) \
-		-I /usr/lib/jvm/java-8-openjdk-amd64/include \
-		-lz -lbz2 -lsnappy -llz4 \
+		-lz -lbz2 -lsnappy -llz4 -lboost_iostreams -ljsoncpp \
 		$(JAVA_STATIC_LDFLAGS)
 	cd java/target;strip -S -x $(ROCKSDBJNILIB)
 	cd java;jar -cf target/$(ROCKSDB_JAR) HISTORY*.md
@@ -1392,8 +1395,7 @@ rocksdbjava1: $(java_libobjects)
 	$(AM_V_GEN)cd java;$(MAKE) javalib;
 	$(AM_V_at)rm -f ./java/target/$(ROCKSDBJNILIB)
 
-jni_native_objs = $(JNI_NATIVE_SOURCES:.cc=.o)
-$(JNI_NATIVE_SOURCES:.cc=.o):%.o:%.cc rocksdbjava1
+$(JNI_NATIVE_SOURCES:.cc=.o):%.o:%.cc rocksdbjava1 make_javalib
 	$(AM_V_at)$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -c $< $(JAVA_LDFLAGS) $(COVERAGEFLAGS) -o $@
 
 rocksdbjava2: rocksdbjava1 $(jni_native_objs)
