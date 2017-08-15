@@ -8,7 +8,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <jni.h>
+#include <algorithm>
 #include <memory>
+#include <string>
+
+#include <boost/format.hpp>
+#include <boost/iostreams/copy.hpp>
+#include <boost/iostreams/device/back_inserter.hpp>
+#include <boost/iostreams/filtering_streambuf.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+
+#include <jsoncpp/json/json.h>
+#include <jsoncpp/json/reader.h>
+#include <jsoncpp/json/writer.h>
+#include <jsoncpp/json/value.h>
 
 #include "include/org_rocksdb_Options.h"
 #include "include/org_rocksdb_DBOptions.h"
@@ -32,6 +45,8 @@
 #include "rocksdb/convenience.h"
 #include "rocksdb/merge_operator.h"
 #include "utilities/merge_operators.h"
+
+#include "util/util.h"
 
 /*
  * Class:     org_rocksdb_Options
@@ -4147,18 +4162,173 @@ void Java_org_rocksdb_FlushOptions_disposeInternal(
 }
 
 // Mutant options
-void Java_org_rocksdb_DBOptions_setMutantMonitorTemp(
-    JNIEnv* env, jobject jobj, jlong jhandle, jboolean monitor) {
-  reinterpret_cast<rocksdb::Options*>(jhandle)->mutant_options.monitor_temp =
-      static_cast<bool>(monitor);
+
+// https://stackoverflow.com/questions/180947/base64-decode-snippet-in-c
+
+namespace Base64 {
+  static const std::string base64_chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789+/";
+
+  static inline bool is_base64(unsigned char c) {
+    return (isalnum(c) || (c == '+') || (c == '/'));
+  }
+
+  std::string Encode(unsigned char const* bytes_to_encode, unsigned int in_len) {
+    std::string ret;
+    int i = 0;
+    int j = 0;
+    unsigned char char_array_3[3];
+    unsigned char char_array_4[4];
+
+    while (in_len--) {
+      char_array_3[i++] = *(bytes_to_encode++);
+      if (i == 3) {
+        char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+        char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+        char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+        char_array_4[3] = char_array_3[2] & 0x3f;
+
+        for(i = 0; (i <4) ; i++)
+          ret += base64_chars[char_array_4[i]];
+        i = 0;
+      }
+    }
+
+    if (i)
+    {
+      for(j = i; j < 3; j++)
+        char_array_3[j] = '\0';
+
+      char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+      char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+      char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+      char_array_4[3] = char_array_3[2] & 0x3f;
+
+      for (j = 0; (j < i + 1); j++)
+        ret += base64_chars[char_array_4[j]];
+
+      while((i++ < 3))
+        ret += '=';
+
+    }
+
+    return ret;
+  }
+
+  std::string Decode(std::string const& encoded_string) {
+    int in_len = encoded_string.size();
+    int i = 0;
+    int j = 0;
+    int in_ = 0;
+    unsigned char char_array_4[4], char_array_3[3];
+    std::string ret;
+
+    while (in_len-- && ( encoded_string[in_] != '=') && is_base64(encoded_string[in_])) {
+      char_array_4[i++] = encoded_string[in_]; in_++;
+      if (i ==4) {
+        for (i = 0; i <4; i++)
+          char_array_4[i] = base64_chars.find(char_array_4[i]);
+
+        char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+        char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+        char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+
+        for (i = 0; (i < 3); i++)
+          ret += char_array_3[i];
+        i = 0;
+      }
+    }
+
+    if (i) {
+      for (j = i; j <4; j++)
+        char_array_4[j] = 0;
+
+      for (j = 0; j <4; j++)
+        char_array_4[j] = base64_chars.find(char_array_4[j]);
+
+      char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+      char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+      char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+
+      for (j = 0; (j < i - 1); j++) ret += char_array_3[j];
+    }
+
+    return ret;
+  }
+};
+
+
+bool _GetBool(const Json::Value& j, const std::string& key) {
+  std::string s = j.get(key, "").asString();
+  std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+  return (s == "true");
 }
 
-/*
- * Class:     org_rocksdb_Options
- * Method:    addDbPath
- */
-void Java_org_rocksdb_Options_addDbPath(
-    JNIEnv* env, jobject jobj, jlong jhandle, jstring jpath, jlong target_size) {
-  const char* path = env->GetStringUTFChars(jpath, 0);
-  (reinterpret_cast<rocksdb::Options*>(jhandle)->db_paths).emplace_back(path, target_size);
+
+void Java_org_rocksdb_Options_setMutantOptionsEncoded(
+    JNIEnv* env, jobject jobj, jlong jhandle, jstring mo) {
+  const char* mo1 = env->GetStringUTFChars(mo, 0);
+
+  // Base64 decode
+  std::string mo2 = Base64::Decode(mo1);
+  //TRACE << boost::format("mo2: %s\n") % mo2;
+
+  // Unzip
+  //   https://stackoverflow.com/questions/27529570/simple-zlib-c-string-compression-and-decompression
+  std::string mo3;
+  {
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> in;
+    in.push(boost::iostreams::zlib_decompressor());
+    std::stringstream ss1;
+    ss1 << mo2;
+    in.push(ss1);
+    std::stringstream ss2;
+    boost::iostreams::copy(in, ss2);
+    mo3 = ss2.str();
+    //TRACE << boost::format("mo3: %s\n") % mo3;
+  }
+
+  // Parse json
+  Json::Value json_root;
+  {
+    Json::Reader reader;
+    if (! reader.parse(mo3, json_root)) {
+      std::cout << "Failed to parse" << reader.getFormattedErrorMessages();
+      exit(1);
+    }
+    std::cout << boost::format("Mutant options: %s\n") % json_root;
+  }
+
+  // Set the options
+  auto options = reinterpret_cast<rocksdb::Options*>(jhandle);
+
+  // If non-zero, we perform bigger reads when doing compaction. If you're running RocksDB on spinning disks, you should set this to at
+  // least 2MB.  That way RocksDB's compaction is doing sequential instead of random reads.
+  // When non-zero, we also force new_table_reader_for_compaction_inputs to true.
+  options->compaction_readahead_size = 2 * 1024 * 1024;
+
+  for (auto i: json_root.get("db_stg_dev_paths", "")) {
+    options->db_paths.emplace_back(i.asString(), 200L*1024*1024*1024);
+  }
+
+  options->compression = rocksdb::kNoCompression;
+  options->compression_per_level.clear();
+  for (int i = 0; i < 7; i ++)
+    options->compression_per_level.emplace_back(rocksdb::kNoCompression);
+
+  rocksdb::BlockBasedTableOptions bbto;
+  bbto.pin_l0_filter_and_index_blocks_in_cache = true;
+  bbto.cache_index_and_filter_blocks = true;
+  options->table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbto));
+
+  options->mutant_options.cache_filter_index_at_all_levels = _GetBool(json_root, "cache_filter_index_at_all_levels");
+  options->mutant_options.monitor_temp = _GetBool(json_root, "monitor_temp");
+  options->mutant_options.migrate_sstables = _GetBool(json_root, "migrate_sstables");
+  options->mutant_options.sst_migration_temperature_threshold = json_root.get("sst_migration_temperature_threshold", 0).asDouble();
+  options->mutant_options.simulation_time_dur_sec = json_root.get("simulation_time_dur_in_sec", 0).asDouble();
+  options->mutant_options.simulated_time_dur_sec  = 1365709.587;
+
+  env->ReleaseStringUTFChars(mo, mo1);
 }

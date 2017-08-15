@@ -1061,6 +1061,13 @@ public class Options extends RocksObject
     return optimizeFiltersForHits(nativeHandle_);
   }
 
+  public Options setMutantOptionsEncoded(final String o) {
+    assert(isOwningHandle());
+    setMutantOptionsEncoded(nativeHandle_, o);
+    return this;
+  }
+
+
   private native static long newOptions();
   private native static long newOptions(long dbOptHandle,
       long cfOptHandle);
@@ -1281,6 +1288,8 @@ public class Options extends RocksObject
   private native void setOptimizeFiltersForHits(long handle,
       boolean optimizeFiltersForHits);
   private native boolean optimizeFiltersForHits(long handle);
+  private native void setMutantOptionsEncoded(long handle, String o);
+
   // instance variables
   Env env_;
   MemTableConfig memTableConfig_;
