@@ -344,7 +344,9 @@ DBOptions::DBOptions(const Options& options)
 #endif  // ROCKSDB_LITE
       fail_if_options_file_error(options.fail_if_options_file_error),
       dump_malloc_stats(options.dump_malloc_stats),
-      avoid_flush_during_recovery(options.avoid_flush_during_recovery) {
+      avoid_flush_during_recovery(options.avoid_flush_during_recovery),
+      mutant_options(options.mutant_options)
+{
 }
 
 static const char* const access_hints[] = {
