@@ -743,6 +743,8 @@ void Mutant::_SstMigrationTriggererWakeup() {
 
 
 void Mutant::_Shutdown() {
+  if (! _initialized)
+    return;
   if (_options == nullptr || ! _options->monitor_temp)
     return;
 
