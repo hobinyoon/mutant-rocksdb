@@ -4164,7 +4164,6 @@ void Java_org_rocksdb_FlushOptions_disposeInternal(
 // Mutant options
 
 // https://stackoverflow.com/questions/180947/base64-decode-snippet-in-c
-
 namespace Base64 {
   static const std::string base64_chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -4313,22 +4312,18 @@ void Java_org_rocksdb_Options_setMutantOptionsEncoded(
     options->db_paths.emplace_back(i.asString(), 200L*1024*1024*1024);
   }
 
-  options->compression = rocksdb::kNoCompression;
-  options->compression_per_level.clear();
-  for (int i = 0; i < 7; i ++)
-    options->compression_per_level.emplace_back(rocksdb::kNoCompression);
-
-  rocksdb::BlockBasedTableOptions bbto;
-  bbto.pin_l0_filter_and_index_blocks_in_cache = true;
-  bbto.cache_index_and_filter_blocks = true;
-  options->table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbto));
-
-  options->mutant_options.cache_filter_index_at_all_levels = _GetBool(json_root, "cache_filter_index_at_all_levels");
   options->mutant_options.monitor_temp = _GetBool(json_root, "monitor_temp");
   options->mutant_options.migrate_sstables = _GetBool(json_root, "migrate_sstables");
-  options->mutant_options.sst_migration_temperature_threshold = json_root.get("sst_migration_temperature_threshold", 0).asDouble();
-  options->mutant_options.simulation_time_dur_sec = json_root.get("simulation_time_dur_in_sec", 0).asDouble();
-  options->mutant_options.simulated_time_dur_sec  = 1365709.587;
+  options->mutant_options.sst_ott = json_root.get("sst_ott", 0).asDouble();
+
+  options->mutant_options.cache_filter_index_at_all_levels = _GetBool(json_root, "cache_filter_index_at_all_levels");
+
+  options->mutant_options.replaying = json_root.isMember("replaying");
+  if (options->mutant_options.replaying) {
+    Json::Value n = json_root.get("replaying", 0);
+    options->mutant_options.simulated_time_dur_sec = n.get("simulated_time_dur_sec", 0).asDouble();
+    options->mutant_options.simulation_time_dur_sec = n.get("simulation_time_dur_sec", 0).asDouble();
+  };
 
   env->ReleaseStringUTFChars(mo, mo1);
 }

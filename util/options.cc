@@ -491,27 +491,32 @@ void DBOptions::Dump(Logger* log) const {
 
 void DBOptions::DumpMutantOptions(Logger* log) const {
   Header(log, "MutantOptions");
-  Header(log, "  cache_filter_index_at_all_levels: %d", mutant_options.cache_filter_index_at_all_levels);
   Header(log, "  monitor_temp: %d", mutant_options.monitor_temp);
   Header(log, "  migrate_sstables: %f", mutant_options.migrate_sstables);
-  Header(log, "  sst_migration_temperature_threshold: %f", mutant_options.sst_migration_temperature_threshold);
+  Header(log, "  sst_ott: %f", mutant_options.sst_ott);
+  Header(log, "  cache_filter_index_at_all_levels: %d", mutant_options.cache_filter_index_at_all_levels);
+  Header(log, "  replaying: %d", mutant_options.replaying);
   Header(log, "  simulation_time_dur_sec: %f", mutant_options.simulation_time_dur_sec);
   Header(log, "  simulated_time_dur_sec: %f", mutant_options.simulated_time_dur_sec);
 }
 
 
 void ColumnFamilyOptions::Dump(Logger* log) const {
-  Header(log, "              Options.comparator: %s", comparator->Name());
+  //TRACE << Util::StackTrace(1) << "\n";
+  // Note: Fixed some SIGSEGVs. The root cause of this function failing was incorrect data structure layout among different object files,
+  //   caused by a partial compilation. That also means the Makefile rules are not very good.
+
+  Header(log, "              Options.comparator: %s", (comparator ? comparator->Name() : "None"));
   Header(log, "          Options.merge_operator: %s",
       merge_operator ? merge_operator->Name() : "None");
   Header(log, "       Options.compaction_filter: %s",
       compaction_filter ? compaction_filter->Name() : "None");
   Header(log, "       Options.compaction_filter_factory: %s",
       compaction_filter_factory ? compaction_filter_factory->Name() : "None");
-  Header(log, "        Options.memtable_factory: %s", memtable_factory->Name());
-  Header(log, "           Options.table_factory: %s", table_factory->Name());
+  Header(log, "        Options.memtable_factory: %s", (memtable_factory ? memtable_factory->Name() : "None"));
+  Header(log, "           Options.table_factory: %s", (table_factory ? table_factory->Name() : "None"));
   Header(log, "           table_factory options: %s",
-      table_factory->GetPrintableTableOptions().c_str());
+      (table_factory ? table_factory->GetPrintableTableOptions().c_str() : "None"));
   Header(log, "       Options.write_buffer_size: %" ROCKSDB_PRIszt,
        write_buffer_size);
   Header(log, " Options.max_write_buffer_number: %d", max_write_buffer_number);
@@ -862,14 +867,15 @@ ReadOptions::ReadOptions(bool cksum, bool cache)
              reinterpret_cast<ReadOptions*>(this));
 }
 
-
 DBOptions::MutantOptions::MutantOptions()
-  : cache_filter_index_at_all_levels(false)
-  , monitor_temp(false)
-  , migrate_sstables(false)
-  , sst_migration_temperature_threshold(20.0)
-  , simulation_time_dur_sec(0.0)
-  , simulated_time_dur_sec(0.0)
+  : monitor_temp(false)
+    , migrate_sstables(false)
+    , sst_ott(20.0)
+    , cache_filter_index_at_all_levels(false)
+    , replaying(false)
+    , simulated_time_dur_sec(0.0)
+    , simulation_time_dur_sec(0.0)
 {
 }
+
 }  // namespace rocksdb

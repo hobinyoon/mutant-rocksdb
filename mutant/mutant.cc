@@ -13,18 +13,17 @@
 using namespace std;
 
 namespace rocksdb {
-
-// 22.761826, when the simulation time is 60,000 sec and the simulated time is
-// 1365709.587 secs.
-double _simulation_over_simulated_time_dur = 0.0;
-
-// Default value 20.0. Will be overwritten by the user-specified option.
-double _sst_migration_temperature_threshold = 20.0;
+double _sst_ott;
 
 const double TEMP_UNINITIALIZED = -1.0;
 const double TEMP_DECAY_FACTOR = 0.999;
-const long TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME = 60;
-const long SST_MIGRATION_TRIGGERER_INTERVAL_SIMULATED_TIME_SEC = 60;
+
+// There are in realtime when not replaying a workload in the past, and in simulated time when replaying one.
+long _temp_update_interval_sec;
+long _sst_migration_triggerer_interval_sec;
+
+// With the Quizup trace, 22.761826: the simulation time is 60,000 secs and the simulated time is 1365709.587 secs, almost 16 days.
+double _simulation_time_dur_over_simulated = 0.0;
 
 
 class SstTemp {
@@ -86,7 +85,7 @@ public:
       _last_updated = t;
     } else {
       double dur_since_last_update_in_sec_simulated_time = (t - _last_updated).total_nanoseconds()
-        / 1000000000.0 / _simulation_over_simulated_time_dur;
+        / 1000000000.0 / _simulation_time_dur_over_simulated;
       // Assume the reads, thus the temperature change, happen in the middle of
       // (_last_updated, t), thus the / 2.0.
       _temp = _temp * pow(TEMP_DECAY_FACTOR, dur_since_last_update_in_sec_simulated_time)
@@ -107,7 +106,7 @@ public:
       return _temp;
     } else {
       return _temp * pow(TEMP_DECAY_FACTOR, (t - _last_updated).total_nanoseconds()
-          / 1000000000.0 / _simulation_over_simulated_time_dur);
+          / 1000000000.0 / _simulation_time_dur_over_simulated);
     }
   }
 
@@ -151,23 +150,34 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
   // Make a copy of the options
   if (mo == nullptr)
     THROW("Unexpected");
-  _options = mo;
+  _options = *mo;
 
-  if (! _options->monitor_temp)
+  if (! _options.monitor_temp)
     return;
 
-  if (_options->simulation_time_dur_sec == 0.0)
-    THROW("Unexpected");
-  if (_options->simulated_time_dur_sec == 0.0)
-    THROW("Unexpected");
-
-  _simulation_over_simulated_time_dur = _options->simulation_time_dur_sec / _options->simulated_time_dur_sec;
-  _sst_migration_temperature_threshold = _options->sst_migration_temperature_threshold;
+  _sst_ott = _options.sst_ott;
 
   _db = db;
   _logger = el;
   if (! _logger)
     THROW("Unexpcted");
+
+  if (_options.replaying) {
+    _temp_update_interval_sec = 60;
+    _sst_migration_triggerer_interval_sec = 60;
+
+    if (_options.simulation_time_dur_sec == 0.0)
+      THROW("Unexpected");
+    if (_options.simulated_time_dur_sec == 0.0)
+      THROW("Unexpected");
+
+    _simulation_time_dur_over_simulated = _options.simulation_time_dur_sec / _options.simulated_time_dur_sec;
+  } else {
+    // 1 sec in real time
+    _temp_update_interval_sec = 1;
+    _sst_migration_triggerer_interval_sec = 1;
+    _simulation_time_dur_over_simulated = 1.0;
+  }
 
 	JSONWriter jwriter;
 	EventHelpers::AppendCurrentTime(&jwriter);
@@ -181,7 +191,7 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
   _temp_updater_thread = new thread(bind(&rocksdb::Mutant::_TempUpdaterRun, this));
 
   // _smt_thread is needed only with migrate_sstables
-  if (_options->migrate_sstables)
+  if (_options.migrate_sstables)
     _smt_thread = new thread(bind(&rocksdb::Mutant::_SstMigrationTriggererRun, this));
 
   _initialized = true;
@@ -191,7 +201,7 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
 void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
 	if (! _initialized)
 		return;
-  if (_options == nullptr || ! _options->monitor_temp)
+  if (! _options.monitor_temp)
     return;
 
   lock_guard<mutex> lk(_memtSetLock);
@@ -220,7 +230,7 @@ void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
 void Mutant::_MemtDeleted(MemTable* m) {
 	if (! _initialized)
 		return;
-  if (_options == nullptr || ! _options->monitor_temp)
+  if (! _options.monitor_temp)
     return;
 
   lock_guard<mutex> lk(_memtSetLock);
@@ -248,7 +258,7 @@ void Mutant::_MemtDeleted(MemTable* m) {
 void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
 	if (! _initialized)
 		return;
-  if (_options == nullptr || ! _options->monitor_temp)
+  if (! _options.monitor_temp)
     return;
 
   lock_guard<mutex> lk(_sstMapLock);
@@ -271,7 +281,7 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
 void Mutant::_SstClosed(BlockBasedTable* bbt) {
 	if (! _initialized)
 		return;
-  if (_options == nullptr || ! _options->monitor_temp)
+  if (! _options.monitor_temp)
     return;
 
   lock_guard<mutex> lk(_sstMapLock);
@@ -301,7 +311,7 @@ void Mutant::_SstClosed(BlockBasedTable* bbt) {
 void Mutant::_SetUpdated() {
 	if (! _initialized)
 		return;
-  if (_options == nullptr || ! _options->monitor_temp)
+  if (! _options.monitor_temp)
     return;
 
   _updatedSinceLastOutput = true;
@@ -327,10 +337,9 @@ uint32_t Mutant::_CalcOutputPathId(
     const std::vector<FileMetaData*>& file_metadata) {
 	if (! _initialized)
 		return 0;
-
-  if (_options == nullptr || ! _options->monitor_temp)
+  if (! _options.monitor_temp)
     return 0;
-  if (! _options->migrate_sstables)
+  if (! _options.migrate_sstables)
     return 0;
 
   if (file_metadata.size() == 0)
@@ -378,7 +387,7 @@ uint32_t Mutant::_CalcOutputPathId(
   // TODO: It has to be the weighted average based on the input SSTable sizes.
   if (input_sst_temp.size() > 0) {
     double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
-    if (avg < _sst_migration_temperature_threshold) {
+    if (avg < _sst_ott) {
       output_path_id = 1;
     }
   }
@@ -407,9 +416,9 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
 
 	if (! _initialized)
 		return path_id;
-  if (_options == nullptr || ! _options->monitor_temp)
+  if (! _options.monitor_temp)
     return path_id;
-  if (! _options->migrate_sstables)
+  if (! _options.migrate_sstables)
     return path_id;
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
@@ -425,7 +434,7 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
     // Cold SSTables stay cold
   } else {
     temp = _Temperature(sst_id, cur_time);
-    if ((temp != -1.0) && (temp < _sst_migration_temperature_threshold)) {
+    if ((temp != -1.0) && (temp < _sst_ott)) {
       output_path_id = 1;
     }
   }
@@ -465,10 +474,9 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
 FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
 	if (! _initialized)
 		return nullptr;
-  if (_options == nullptr || ! _options->monitor_temp)
+  if (! _options.monitor_temp)
     return nullptr;
-
-  if (! _options->migrate_sstables)
+  if (! _options.migrate_sstables)
     return nullptr;
 
   FileMetaData* fmd_with_temp_min = nullptr;
@@ -499,7 +507,7 @@ FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
       continue;
 
     double temp = st->Temp(cur_time);
-    if ((temp != TEMP_UNINITIALIZED) && (temp < _sst_migration_temperature_threshold))
+    if ((temp != TEMP_UNINITIALIZED) && (temp < _sst_ott))
       temp_sstid[temp] = sst_id;
   }
 
@@ -573,17 +581,16 @@ void Mutant::_TempUpdaterRun() {
 
               long c = st->GetAndResetNumReads();
               if (c > 0) {
-                double dur_since_last_update_simulated_time;
+                double dur_since_last_update;
                 if (prev_time.is_not_a_date_time()) {
-                  // No need to worry about the time duration and the
-                  // inaccuracy.  This happens only once right after RocksDB is
+                  // No need to worry about the time duration and the inaccuracy.  This happens only once right after RocksDB is
                   // initialized.
-                  dur_since_last_update_simulated_time = TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME;
+                  dur_since_last_update = _temp_update_interval_sec;
                 } else {
-                  dur_since_last_update_simulated_time = (cur_time - prev_time).total_nanoseconds()
-                    / 1000000000.0 / _simulation_over_simulated_time_dur;
+                  dur_since_last_update = (cur_time - prev_time).total_nanoseconds()
+                    / 1000000000.0 / _simulation_time_dur_over_simulated;
                 }
-                double reads_per_64MB_per_sec = double(c) / (st->Size() / (64.0*1024*1024)) / dur_since_last_update_simulated_time;
+                double reads_per_64MB_per_sec = double(c) / (st->Size() / (64.0*1024*1024)) / dur_since_last_update;
 
                 // Update temperature. You don't need to update st when c != 0.
                 st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
@@ -627,9 +634,9 @@ void Mutant::_TempUpdaterRun() {
 }
 
 
-// Sleep for TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME or until woken up by another thread.
+// Sleep for _temp_update_interval_sec or until woken up by another thread.
 void Mutant::_TempUpdaterSleep() {
-  static const auto wait_dur = chrono::milliseconds(long(TEMP_UPDATE_INTERVAL_SEC_SIMULATED_TIME * 1000.0 * _simulation_over_simulated_time_dur));
+  static const auto wait_dur = chrono::milliseconds(long(_temp_update_interval_sec * 1000.0 * _simulation_time_dur_over_simulated));
   //TRACE << boost::format("%d ms\n") % wait_dur.count();
   unique_lock<mutex> lk(_temp_updater_sleep_mutex);
   _temp_updater_sleep_cv.wait_for(lk, wait_dur, [&](){return _temp_updater_wakeupnow;});
@@ -707,7 +714,7 @@ void Mutant::_SstMigrationTriggererRun() {
             continue;
 
           double temp = st->Temp(cur_time);
-          if ((temp != TEMP_UNINITIALIZED) && (temp < _sst_migration_temperature_threshold)) {
+          if ((temp != TEMP_UNINITIALIZED) && (temp < _sst_ott)) {
             may_have_sstable_to_migrate = true;
             break;
           }
@@ -726,7 +733,7 @@ void Mutant::_SstMigrationTriggererRun() {
 
 // These 2 functions are not called when monitor_temp = false
 void Mutant::_SstMigrationTriggererSleep() {
-  static const auto wait_dur = chrono::milliseconds(long(SST_MIGRATION_TRIGGERER_INTERVAL_SIMULATED_TIME_SEC * 1000.0 * _simulation_over_simulated_time_dur));
+  static const auto wait_dur = chrono::milliseconds(long(_sst_migration_triggerer_interval_sec * 1000.0 * _simulation_time_dur_over_simulated));
   unique_lock<mutex> lk(_smt_sleep_mutex);
   _smt_sleep_cv.wait_for(lk, wait_dur, [&](){return _smt_wakeupnow;});
   _smt_wakeupnow = false;
@@ -744,8 +751,6 @@ void Mutant::_SstMigrationTriggererWakeup() {
 
 void Mutant::_Shutdown() {
   if (! _initialized)
-    return;
-  if (_options == nullptr || ! _options->monitor_temp)
     return;
 
   _smt_stop_requested = true;
@@ -771,7 +776,7 @@ void Mutant::_Shutdown() {
 
 const DBOptions::MutantOptions* Mutant::_Options() {
   if (_initialized)
-    return _options;
+    return &_options;
   else
     return nullptr;
 }

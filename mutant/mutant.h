@@ -48,7 +48,9 @@ class SstTemp;
 //   triggers migration.
 
 class Mutant {
-  const DBOptions::MutantOptions* _options;
+  // Let's keep a copy here. It gets SIGSEGV everywhere. I suspect the undeterministic behavior is form the race from a lot of the DB
+  // threads. If we kept a pointer here, we are not sure of the lifetime of the _options.
+  DBOptions::MutantOptions _options;
   DBImpl* _db = nullptr;
   EventLogger* _logger = nullptr;
   ColumnFamilyData* _cfd = nullptr;

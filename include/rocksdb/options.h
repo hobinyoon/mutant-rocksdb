@@ -1359,22 +1359,23 @@ struct DBOptions {
   bool avoid_flush_during_recovery;
 
   struct MutantOptions {
-    bool cache_filter_index_at_all_levels;
-
-    // monitor tablet temperatures
     bool monitor_temp;
 
+    // SSTable organization
     bool migrate_sstables;
+    double sst_ott;
 
-    double sst_migration_temperature_threshold;
+    // SSTable metadata organization
+    bool cache_filter_index_at_all_levels;
 
-    double simulation_time_dur_sec;
+    // Replay a workload in the past
+    bool replaying;
     double simulated_time_dur_sec;
+    double simulation_time_dur_sec;
 
     // Create MutantOptions with default values for all fields
     MutantOptions();
   };
-
   MutantOptions mutant_options;
 };
 
