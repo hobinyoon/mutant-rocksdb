@@ -492,7 +492,7 @@ void DBOptions::Dump(Logger* log) const {
 void DBOptions::DumpMutantOptions(Logger* log) const {
   Header(log, "MutantOptions");
   Header(log, "  monitor_temp: %d", mutant_options.monitor_temp);
-  Header(log, "  migrate_sstables: %f", mutant_options.migrate_sstables);
+  Header(log, "  migrate_sstables: %d", mutant_options.migrate_sstables);
   Header(log, "  sst_ott: %f", mutant_options.sst_ott);
   Header(log, "  cache_filter_index_at_all_levels: %d", mutant_options.cache_filter_index_at_all_levels);
   Header(log, "  replaying: %d", mutant_options.replaying);

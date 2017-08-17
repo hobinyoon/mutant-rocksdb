@@ -5766,9 +5766,7 @@ Status DB::Open1(const Options& options, const std::string& dbname,
                 std::vector<ColumnFamilyHandle*>* handles, DB** dbptr) {
   // Mutant: extra optimization.
   std::vector<ColumnFamilyDescriptor> cfds(column_families);
-  TRACE << "\n";
   for (auto& cfd: cfds) {
-    TRACE << "\n";
     cfd.options.compression = rocksdb::kNoCompression;
     cfd.options.compression_per_level.clear();
     for (int i = 0; i < 7; i ++)
