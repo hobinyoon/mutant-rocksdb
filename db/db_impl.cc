@@ -5735,6 +5735,18 @@ DB::~DB() { }
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   DBOptions db_options(options);
   ColumnFamilyOptions cf_options(options);
+
+  // Mutant: extra optimization.
+  cf_options.compression = rocksdb::kNoCompression;
+  cf_options.compression_per_level.clear();
+  for (int i = 0; i < 7; i ++)
+    cf_options.compression_per_level.emplace_back(rocksdb::kNoCompression);
+
+  rocksdb::BlockBasedTableOptions bbto;
+  bbto.pin_l0_filter_and_index_blocks_in_cache = true;
+  bbto.cache_index_and_filter_blocks = true;
+  cf_options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbto));
+
   std::vector<ColumnFamilyDescriptor> column_families;
   column_families.push_back(
       ColumnFamilyDescriptor(kDefaultColumnFamilyName, cf_options));
@@ -5752,10 +5764,25 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
 Status DB::Open1(const Options& options, const std::string& dbname,
                 const std::vector<ColumnFamilyDescriptor>& column_families,
                 std::vector<ColumnFamilyHandle*>* handles, DB** dbptr) {
-  DBOptions db_options(options);
-	return DB::Open(db_options, dbname, column_families, handles, dbptr);
-}
+  // Mutant: extra optimization.
+  std::vector<ColumnFamilyDescriptor> cfds(column_families);
+  TRACE << "\n";
+  for (auto& cfd: cfds) {
+    TRACE << "\n";
+    cfd.options.compression = rocksdb::kNoCompression;
+    cfd.options.compression_per_level.clear();
+    for (int i = 0; i < 7; i ++)
+      cfd.options.compression_per_level.emplace_back(rocksdb::kNoCompression);
 
+    rocksdb::BlockBasedTableOptions bbto;
+    bbto.pin_l0_filter_and_index_blocks_in_cache = true;
+    bbto.cache_index_and_filter_blocks = true;
+    cfd.options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbto));
+  }
+
+  DBOptions db_options(options);
+  return DB::Open(db_options, dbname, cfds, handles, dbptr);
+}
 
 Status DB::Open(const DBOptions& db_options, const std::string& dbname,
                 const std::vector<ColumnFamilyDescriptor>& column_families,
