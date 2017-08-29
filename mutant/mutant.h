@@ -114,7 +114,8 @@ class Mutant {
   double _Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time);
   uint32_t _CalcOutputPathId(
       bool temperature_triggered_single_sstable_compaction,
-      const std::vector<FileMetaData*>& file_metadata);
+      const std::vector<FileMetaData*>& file_metadata,
+      int output_level);
   uint32_t _CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
   FileMetaData*_PickColdestSstForMigration(int& level_for_migration);
 

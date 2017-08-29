@@ -334,12 +334,15 @@ double Mutant::_Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur
 
 uint32_t Mutant::_CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
-    const std::vector<FileMetaData*>& file_metadata) {
+    const std::vector<FileMetaData*>& file_metadata,
+    int output_level) {
 	if (! _initialized)
 		return 0;
   if (! _options.monitor_temp)
     return 0;
   if (! _options.migrate_sstables)
+    return 0;
+  if ((!_options.migrate_L0_sstables) && output_level <= 0)
     return 0;
 
   if (file_metadata.size() == 0)
@@ -498,8 +501,11 @@ FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
     uint64_t sst_id = i.first;
     SstTemp* st = i.second;
     int level = i.second->Level();
-    // We don't consider level -1 (there used to be, not anymore) and 0.
-    if (level <= 0)
+    // We don't consider level -1 (there used to be, not anymore).
+    if (level < 0)
+      continue;
+
+    if ((!_options.migrate_L0_sstables) && level == 0)
       continue;
 
     // TODO: Revisit this for multi-level path_ids. 2-level for now.
@@ -705,8 +711,11 @@ void Mutant::_SstMigrationTriggererRun() {
         for (auto i: _sstMap) {
           SstTemp* st = i.second;
           int level = i.second->Level();
-          // We don't consider level -1 (there used to be, not anymore) and 0.
-          if (level <= 0)
+          // We don't consider level -1 (there used to be, not anymore).
+          if (level < 0)
+            continue;
+
+          if ((!_options.migrate_L0_sstables) && level == 0)
             continue;
 
           // TODO: Revisit this for multi-level path_ids. 2-level for now.
@@ -872,7 +881,8 @@ void Mutant::SetUpdated() {
 
 uint32_t Mutant::CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
-    const std::vector<FileMetaData*>& file_metadata) {
+    const std::vector<FileMetaData*>& file_metadata,
+    int output_level) {
   static Mutant& i = _GetInst();
   return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata);
 }

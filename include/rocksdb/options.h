@@ -1364,6 +1364,7 @@ struct DBOptions {
     // SSTable organization
     bool migrate_sstables;
     double sst_ott;
+    bool organize_L0_sstables;
 
     // SSTable metadata organization
     bool cache_filter_index_at_all_levels;
