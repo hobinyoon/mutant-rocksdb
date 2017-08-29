@@ -342,7 +342,7 @@ uint32_t Mutant::_CalcOutputPathId(
     return 0;
   if (! _options.migrate_sstables)
     return 0;
-  if ((!_options.migrate_L0_sstables) && output_level <= 0)
+  if ((!_options.organize_L0_sstables) && output_level <= 0)
     return 0;
 
   if (file_metadata.size() == 0)
@@ -505,7 +505,7 @@ FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
     if (level < 0)
       continue;
 
-    if ((!_options.migrate_L0_sstables) && level == 0)
+    if ((!_options.organize_L0_sstables) && level == 0)
       continue;
 
     // TODO: Revisit this for multi-level path_ids. 2-level for now.
@@ -715,7 +715,7 @@ void Mutant::_SstMigrationTriggererRun() {
           if (level < 0)
             continue;
 
-          if ((!_options.migrate_L0_sstables) && level == 0)
+          if ((!_options.organize_L0_sstables) && level == 0)
             continue;
 
           // TODO: Revisit this for multi-level path_ids. 2-level for now.
@@ -884,7 +884,7 @@ uint32_t Mutant::CalcOutputPathId(
     const std::vector<FileMetaData*>& file_metadata,
     int output_level) {
   static Mutant& i = _GetInst();
-  return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata);
+  return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata, output_level);
 }
 
 
