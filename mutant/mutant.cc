@@ -758,6 +758,11 @@ void Mutant::_SstMigrationTriggererWakeup() {
 }
 
 
+void Mutant::_SetSstOtt(double sst_ott) {
+  _sst_ott = sst_ott;
+}
+
+
 void Mutant::_Shutdown() {
   if (! _initialized)
     return;
@@ -897,6 +902,12 @@ uint32_t Mutant::CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
 FileMetaData* Mutant::PickColdestSstForMigration(int& level_for_migration) {
   static Mutant& i = _GetInst();
   return i._PickColdestSstForMigration(level_for_migration);
+}
+
+
+void Mutant::SetSstOtt(double sst_ott) {
+  static Mutant& i = _GetInst();
+  i._SetSstOtt(sst_ott);
 }
 
 

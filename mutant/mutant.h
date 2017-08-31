@@ -127,6 +127,8 @@ class Mutant {
   void _SstMigrationTriggererSleep();
   void _SstMigrationTriggererWakeup();
 
+  void _SetSstOtt(double sst_ott);
+
   void _Shutdown();
 
   const DBOptions::MutantOptions* _Options();
@@ -146,6 +148,8 @@ public:
   static uint32_t CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
 
   static FileMetaData* PickColdestSstForMigration(int& level_for_migration);
+
+  static void SetSstOtt(double sst_ott);
 
   static void Shutdown();
 
