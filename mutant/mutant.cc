@@ -169,7 +169,7 @@ public:
   virtual ~SlaAdmin() { }
 
   // Calc an adjustment to the controlling value.
-  double CalcAdj(double cur_value) {
+  double CalcAdj(double cur_value, JSONWriter& jwriter) {
     double error = _target_value - cur_value;
     boost::posix_time::ptime ts = boost::posix_time::microsec_clock::local_time();
 
@@ -188,20 +188,11 @@ public:
 
     double adj = _p * error + _i * _integral + _d * derivative;
 
-    {
-      JSONWriter jwriter;
-      EventHelpers::AppendCurrentTime(&jwriter);
-      jwriter << "mutant_sla_admin_adjust";
-      jwriter.StartObject();
-      jwriter << "cur_value" << cur_value;
-      jwriter << "dt" << dt;
-      jwriter << "p" << error;
-      jwriter << "i" << _integral;
-      jwriter << "adj" << adj;
-      jwriter.EndObject();
-      jwriter.EndObject();
-      _logger->Log(jwriter);
-    }
+    jwriter << "dt" << dt;
+    jwriter << "p" << error;
+    jwriter << "i" << _integral;
+    jwriter << "d" << derivative;
+    jwriter << "adj" << adj;
 
     return adj;
   }
@@ -854,7 +845,19 @@ void Mutant::_SlaAdminInit(double target_lat, double p, double i, double d) {
 void Mutant::_SlaAdminAdjust(double lat) {
   if (_sla_admin == nullptr)
     THROW("Unexpected");
-  _sst_ott += _sla_admin->CalcAdj(lat);
+
+  JSONWriter jwriter;
+  EventHelpers::AppendCurrentTime(&jwriter);
+  jwriter << "mutant_sla_admin_adjust";
+  jwriter.StartObject();
+  jwriter << "cur_lat" << lat;;
+
+  _sst_ott += _sla_admin->CalcAdj(lat, jwriter);
+
+  jwriter << "sst_ott" << _sst_ott;;
+  jwriter.EndObject();
+  jwriter.EndObject();
+  _logger->Log(jwriter);
 }
 
 
