@@ -141,10 +141,30 @@ class SlaAdmin {
   boost::posix_time::ptime _prev_ts;
   bool _prev_ts_defined = false;
 
+  EventLogger* _logger;
+
 public:
-  SlaAdmin(double target_value, double p, double i, double d)
+  SlaAdmin(double target_value, double p, double i, double d, EventLogger* logger)
     : _target_value(target_value), _p(p), _i(i), _d(d)
-  { }
+  {
+    if (logger == nullptr)
+      THROW("Unexpected");
+    _logger = logger;
+
+    {
+      JSONWriter jwriter;
+      EventHelpers::AppendCurrentTime(&jwriter);
+      jwriter << "mutant_sla_admin_init";
+      jwriter.StartObject();
+      jwriter << "target_value" << target_value;
+      jwriter << "p" << _p;
+      jwriter << "i" << _i;
+      jwriter << "d" << _d;
+      jwriter.EndObject();
+      jwriter.EndObject();
+      _logger->Log(jwriter);
+    }
+  }
 
   virtual ~SlaAdmin() { }
 
@@ -155,8 +175,9 @@ public:
 
     // No integral or derivative term on the first fun
     double derivative = 0.0;
+    long dt = 0.0;
     if (_prev_ts_defined) {
-      long dt = (ts - _prev_ts).total_milliseconds();
+      dt = (ts - _prev_ts).total_milliseconds();
       _integral += (error * dt);
       derivative = (error - _prev_error) / dt;
     }
@@ -165,7 +186,24 @@ public:
     _prev_ts = ts;
     _prev_ts_defined = true;
 
-    return _p * error + _i * _integral + _d * derivative;
+    double adj = _p * error + _i * _integral + _d * derivative;
+
+    {
+      JSONWriter jwriter;
+      EventHelpers::AppendCurrentTime(&jwriter);
+      jwriter << "mutant_sla_admin_adjust";
+      jwriter.StartObject();
+      jwriter << "cur_value" << cur_value;
+      jwriter << "dt" << dt;
+      jwriter << "p" << error;
+      jwriter << "i" << _integral;
+      jwriter << "adj" << adj;
+      jwriter.EndObject();
+      jwriter.EndObject();
+      _logger->Log(jwriter);
+    }
+
+    return adj;
   }
 };
 
@@ -808,7 +846,7 @@ void Mutant::_SlaAdminInit(double target_lat, double p, double i, double d) {
   static mutex m;
   lock_guard<mutex> _(m);
   if (_sla_admin == nullptr) {
-    _sla_admin = new SlaAdmin(target_lat, p, i, d);
+    _sla_admin = new SlaAdmin(target_lat, p, i, d, _logger);
   }
 }
 
@@ -816,7 +854,6 @@ void Mutant::_SlaAdminInit(double target_lat, double p, double i, double d) {
 void Mutant::_SlaAdminAdjust(double lat) {
   if (_sla_admin == nullptr)
     THROW("Unexpected");
-
   _sst_ott += _sla_admin->CalcAdj(lat);
 }
 

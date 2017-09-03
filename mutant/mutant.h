@@ -154,12 +154,12 @@ public:
 
   static FileMetaData* PickColdestSstForMigration(int& level_for_migration);
 
-  void SlaAdminInit(double target_lat, double p, double i, double d);
+  static void SlaAdminInit(double target_lat, double p, double i, double d);
 
   // We play with the average read latency. It is a client-observed latency, but can be embedded in the DB as well.
   //   An advantage of the client-observed one is that the DB doesn't need to know the specifics of the storage such as cost.
   //     It can be configured from outside.
-  void SlaAdminAdjust(double lat);
+  static void SlaAdminAdjust(double lat);
 
   static void Shutdown();
 
