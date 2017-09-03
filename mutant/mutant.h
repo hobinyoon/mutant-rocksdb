@@ -74,12 +74,10 @@ class Mutant {
   // Note: disable MemTable monitoring when measuring the monitoring overhead.
   std::set<MemTable*> _memtSet;
   std::mutex _memtSetLock;
-  std::mutex _memtSetLock2;
 
   // map<sst_id, SstTemp*>
   std::map<uint64_t, SstTemp*> _sstMap;
   std::mutex _sstMapLock;
-  std::mutex _sstMapLock2;
 
   std::thread* _temp_updater_thread = nullptr;
   std::mutex _temp_updater_sleep_mutex;
@@ -115,7 +113,9 @@ class Mutant {
   void _SstClosed(BlockBasedTable* bbt);
   void _RunTempUpdaterAndWait();
   void _SetUpdated();
-  double _Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time);
+  double _SstTemperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time);
+  int _SstLevel(uint64_t sst_id);
+
   uint32_t _CalcOutputPathId(
       bool temperature_triggered_single_sstable_compaction,
       const std::vector<FileMetaData*>& file_metadata,

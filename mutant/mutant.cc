@@ -52,7 +52,7 @@ class SstTemp {
   //bool _became_cold_at_defined = false;
 
 public:
-  // This is called by _SstOpened() with the locks (_sstMapLock, _sstMapLock2) held.
+  // This is called by _SstOpened() with _sstMapLock held.
   SstTemp(TableReader* tr, const FileDescriptor* fd, int level)
   : _tr(tr)
     , _created(boost::posix_time::microsec_clock::local_time())
@@ -73,7 +73,7 @@ public:
     return _tr->GetAndResetNumReads();
   }
 
-  // This is called with _sstMapLock2 held.
+  // This is called with _sstMapLock held.
   void UpdateTemp(long reads, double reads_per_64MB_per_sec, const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
       // When you get a first accfreq, assume the same amount of accesses have
@@ -100,7 +100,7 @@ public:
     }
   }
 
-  // This is called with _sstMapLock2 held.
+  // This is called with _sstMapLock held.
   double Temp(const boost::posix_time::ptime& t) {
     if (_temp == TEMP_UNINITIALIZED) {
       return _temp;
@@ -292,7 +292,6 @@ void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
 
   auto it = _memtSet.find(m);
   if (it == _memtSet.end()) {
-    lock_guard<mutex> lk2(_memtSetLock2);
     _memtSet.insert(m);
     // Note: Log creation/deletion time, if needed. You don't need to wake up
     // the temp_updater thread.
@@ -323,8 +322,6 @@ void Mutant::_MemtDeleted(MemTable* m) {
   } else {
     // Update temp and report for the last time before erasing the entry
     _RunTempUpdaterAndWait();
-
-    lock_guard<mutex> lk2(_memtSetLock2);
     _memtSet.erase(it);
   }
 }
@@ -345,7 +342,6 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
 
   auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
-    lock_guard<mutex> lk2(_sstMapLock2);
     _sstMap[sst_id] = st;
   } else {
     THROW("Unexpected");
@@ -373,10 +369,6 @@ void Mutant::_SstClosed(BlockBasedTable* bbt) {
     // Update temp and report for the last time before erasing the entry.
     _RunTempUpdaterAndWait();
 
-    // You need a 2-level locking with _sstMapLock and _sstMapLock2.
-    // _RunTempUpdaterAndWait() waits for the temp_updater thread to finish a cycle, which
-    // acquires _sstMapLock2. The same goes with _memtSetLock2.
-    lock_guard<mutex> lk2(_sstMapLock2);
     delete it->second;
     _sstMap.erase(it);
   }
@@ -393,8 +385,8 @@ void Mutant::_SetUpdated() {
 }
 
 
-double Mutant::_Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time) {
-  lock_guard<mutex> _(_sstMapLock2);
+double Mutant::_SstTemperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time) {
+  lock_guard<mutex> _(_sstMapLock);
   auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
     //THROW(boost::format("Unexpected: sst_id=%d") % sst_id);
@@ -404,6 +396,22 @@ double Mutant::_Temperature(uint64_t sst_id, const boost::posix_time::ptime& cur
   }
   SstTemp* st = it->second;
   return st->Temp(cur_time);
+}
+
+
+int Mutant::_SstLevel(uint64_t sst_id) {
+  lock_guard<mutex> _(_sstMapLock);
+
+  int level = -1;
+  auto it = _sstMap.find(sst_id);
+  if (it == _sstMap.end()) {
+    //THROW("Unexpected");
+    // This happens when you open an existing SSTable. Set level as undefined.
+  } else {
+    SstTemp* st = it->second;
+    level = st->Level();
+  }
+  return level;
 }
 
 
@@ -432,29 +440,15 @@ uint32_t Mutant::_CalcOutputPathId(
   for (const auto& fmd: file_metadata) {
     uint64_t sst_id = fmd->fd.GetNumber();
     uint32_t path_id = fmd->fd.GetPathId();
-    double temp = _Temperature(sst_id, cur_time);
+    double temp = _SstTemperature(sst_id, cur_time);
 
     if (temp != -1.0)
       input_sst_temp.push_back(temp);
 
     input_sst_path_id.push_back(path_id);
 
-    int level;
-    {
-      lock_guard<mutex> lk2(_sstMapLock2);
-      auto it = _sstMap.find(sst_id);
-      if (it == _sstMap.end()) {
-        //THROW("Unexpected");
-        // This happens when you open an existing SSTable. Set level as undefined.
-        level = -1;
-      } else {
-        SstTemp* st = it->second;
-        level = st->Level();
-      }
-    }
-
     input_sst_info.push_back(str(boost::format("(sst_id=%d level=%d path_id=%d temp=%.3f)")
-          % sst_id % level % path_id % temp));
+          % sst_id % _SstLevel(sst_id) % path_id % temp));
   }
 
   // Output path_id starts from the min of input path_ids
@@ -462,7 +456,8 @@ uint32_t Mutant::_CalcOutputPathId(
 
   // If the average input SSTable tempereture is below a threshold, set the
   // output path_id accordingly.
-  // TODO: It has to be the weighted average based on the input SSTable sizes.
+  //
+  // This needs to be the weighted average using the input SSTable sizes. To be precise. It's ok for now.
   if (input_sst_temp.size() > 0) {
     double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
     if (avg < _sst_ott) {
@@ -511,27 +506,15 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   if (path_id == 1) {
     // Cold SSTables stay cold
   } else {
-    temp = _Temperature(sst_id, cur_time);
+    temp = _SstTemperature(sst_id, cur_time);
     if ((temp != -1.0) && (temp < _sst_ott)) {
       output_path_id = 1;
     }
   }
 
   {
-    int level = -1;
-    {
-      lock_guard<mutex> lk2(_sstMapLock2);
-      auto it = _sstMap.find(sst_id);
-      if (it == _sstMap.end()) {
-        //THROW("Unexpected");
-        // This happens when you open an existing db. Set level to -1.
-      } else {
-        SstTemp* st = it->second;
-        level = st->Level();
-      }
-    }
     string input_sst_info = str(boost::format("sst_id=%d level=%d path_id=%d temp=%.3f")
-        % sst_id % level % path_id % temp);
+        % sst_id % _SstLevel(sst_id) % path_id % temp);
 
     JSONWriter jwriter;
     EventHelpers::AppendCurrentTime(&jwriter);
@@ -571,7 +554,7 @@ FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
-  lock_guard<mutex> _(_sstMapLock2);
+  lock_guard<mutex> _(_sstMapLock);
   for (auto i: _sstMap) {
     uint64_t sst_id = i.first;
     SstTemp* st = i.second;
@@ -640,7 +623,7 @@ void Mutant::_TempUpdaterRun() {
         if (_updatedSinceLastOutput) {
           vector<string> memt_stat_str;
           {
-            lock_guard<mutex> lk2(_memtSetLock2);
+            lock_guard<mutex> lk2(_memtSetLock);
             for (auto mt: _memtSet) {
               // Get-and-reset the read counter
               long c = mt->_num_reads.exchange(0);
@@ -653,9 +636,9 @@ void Mutant::_TempUpdaterRun() {
             }
           }
 
-          vector<string> sst_stat_str;
+          vector<string> sst_status_str;
           {
-            lock_guard<mutex> lk2(_sstMapLock2);
+            lock_guard<mutex> lk2(_sstMapLock);
             for (auto i: _sstMap) {
               uint64_t sst_id = i.first;
               SstTemp* st = i.second;
@@ -676,7 +659,7 @@ void Mutant::_TempUpdaterRun() {
                 // Update temperature. You don't need to update st when c != 0.
                 st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
 
-                sst_stat_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
+                sst_status_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
                       % sst_id % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
               }
             }
@@ -684,15 +667,15 @@ void Mutant::_TempUpdaterRun() {
 
           // Output to the rocksdb log. The condition is just to reduce
           // memt-only logs. So not all memt stats are reported, which is okay.
-          if ((sst_stat_str.size() > 0) && (_logger != nullptr)) {
+          if ((sst_status_str.size() > 0) && (_logger != nullptr)) {
             JSONWriter jwriter;
             EventHelpers::AppendCurrentTime(&jwriter);
             jwriter << "mutant_table_acc_cnt";
             jwriter.StartObject();
             if (memt_stat_str.size() > 0)
               jwriter << "memt" << boost::algorithm::join(memt_stat_str, " ");
-            if (sst_stat_str.size() > 0)
-              jwriter << "sst" << boost::algorithm::join(sst_stat_str, " ");
+            if (sst_status_str.size() > 0)
+              jwriter << "sst" << boost::algorithm::join(sst_status_str, " ");
             jwriter.EndObject();
             jwriter.EndObject();
             _logger->Log(jwriter);
@@ -782,7 +765,7 @@ void Mutant::_SstMigrationTriggererRun() {
       bool may_have_sstable_to_migrate = false;
       boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
       {
-        lock_guard<mutex> _(_sstMapLock2);
+        lock_guard<mutex> _(_sstMapLock);
         for (auto i: _sstMap) {
           SstTemp* st = i.second;
           int level = i.second->Level();
@@ -852,9 +835,62 @@ void Mutant::_SlaAdminAdjust(double lat) {
   jwriter.StartObject();
   jwriter << "cur_lat" << lat;;
 
-  _sst_ott += _sla_admin->CalcAdj(lat, jwriter);
+  // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
+  //   E.g., when there is no error, the sst_ott can be like 10.
+  double adj = _sla_admin->CalcAdj(lat, jwriter);
+  double new_sst_ott = _sst_ott + adj;
+  // Force sst_ott always be positive.
+  //   Don't think a negative value is harmful. It means keeping all SSTables in fast device. But still feels strange.
+  //   The temporary variable is to avoid other threads accessing the intermediate value.
+  if (new_sst_ott < 0.0)
+    new_sst_ott = 0.0;
+  _sst_ott = new_sst_ott;
 
   jwriter << "sst_ott" << _sst_ott;;
+
+  // List SSTables.
+  //   Current temperature.
+  //   The current storage device.
+  //   Where it should be based on the current sst_ott.
+  // The number of SSTables in fast and slow devices.
+  // The number of SSTables that would be in fast and slow devices based on the current sst_ott.
+
+  int num_ssts_fast = 0;
+  int num_ssts_slow = 0;
+  int num_ssts_fast_should_be = 0;
+  int num_ssts_slow_should_be = 0;
+  vector<string> sst_status_str;
+  {
+    boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+    {
+      lock_guard<mutex> l_(_sstMapLock);
+      for (auto i: _sstMap) {
+        uint64_t sst_id = i.first;
+        SstTemp* st = i.second;
+        double temp = st->Temp(cur_time);
+        uint32_t path_id = st->PathId();
+        uint32_t path_id_should_be = (_sst_ott < temp) ? 0 : 1;
+        if (path_id == 0) {
+          num_ssts_fast ++;
+        } else {
+          num_ssts_slow ++;
+        }
+        if (path_id_should_be == 0) {
+          num_ssts_fast_should_be ++;
+        } else {
+          num_ssts_slow_should_be ++;
+        }
+        sst_status_str.push_back(str(boost::format("%d:%d:%.3f:%d")
+              % sst_id % st->Level() % temp % path_id % path_id_should_be));
+      }
+    }
+  }
+  jwriter << "sst_status" << boost::algorithm::join(sst_status_str, " ");
+  jwriter << "num_ssts_in_fast_dev" << num_ssts_fast;
+  jwriter << "num_ssts_in_slow_dev" << num_ssts_slow;
+  jwriter << "num_ssts_should_be_in_fast_dev" << num_ssts_fast_should_be;
+  jwriter << "num_ssts_should_be_in_slow_dev" << num_ssts_slow_should_be;
+
   jwriter.EndObject();
   jwriter.EndObject();
   _logger->Log(jwriter);
