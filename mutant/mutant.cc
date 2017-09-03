@@ -175,9 +175,9 @@ public:
 
     // No integral or derivative term on the first fun
     double derivative = 0.0;
-    long dt = 0.0;
+    double dt = 0.0;
     if (_prev_ts_defined) {
-      dt = (ts - _prev_ts).total_milliseconds();
+      dt = (ts - _prev_ts).total_milliseconds() / 1000.0;
       _integral += (error * dt);
       derivative = (error - _prev_error) / dt;
     }
@@ -835,15 +835,30 @@ void Mutant::_SlaAdminAdjust(double lat) {
   jwriter.StartObject();
   jwriter << "cur_lat" << lat;;
 
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+
+  double cur_max_sst_temp = 0.0;
+  {
+    lock_guard<mutex> l_(_sstMapLock);
+    for (auto i: _sstMap) {
+      SstTemp* st = i.second;
+      cur_max_sst_temp = max(cur_max_sst_temp, st->Temp(cur_time));
+    }
+  }
+
   // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
   //   E.g., when there is no error, the sst_ott can be like 10.
   double adj = _sla_admin->CalcAdj(lat, jwriter);
   double new_sst_ott = _sst_ott + adj;
-  // Force sst_ott always be positive.
-  //   Don't think a negative value is harmful. It means keeping all SSTables in fast device. But still feels strange.
+  // Force sst_ott to be
+  //   (a) > 0: Just because a negative value doesn't make any sense.
+  //     I dont't think it's harmful though. It means keeping all SSTables in fast device. But still feels strange.
+  //   (b) < _cur_sst_tmp_max: not to set it to far.
   //   The temporary variable is to avoid other threads accessing the intermediate value.
   if (new_sst_ott < 0.0)
     new_sst_ott = 0.0;
+  if (cur_max_sst_temp < new_sst_ott)
+    new_sst_ott = cur_max_sst_temp;
   _sst_ott = new_sst_ott;
 
   jwriter << "sst_ott" << _sst_ott;;
@@ -861,7 +876,6 @@ void Mutant::_SlaAdminAdjust(double lat) {
   int num_ssts_slow_should_be = 0;
   vector<string> sst_status_str;
   {
-    boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
     {
       lock_guard<mutex> l_(_sstMapLock);
       for (auto i: _sstMap) {
@@ -880,7 +894,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
         } else {
           num_ssts_slow_should_be ++;
         }
-        sst_status_str.push_back(str(boost::format("%d:%d:%.3f:%d")
+        sst_status_str.push_back(str(boost::format("%d:%d:%.3f:%d:%d")
               % sst_id % st->Level() % temp % path_id % path_id_should_be));
       }
     }
