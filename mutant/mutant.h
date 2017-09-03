@@ -23,6 +23,7 @@ class MemTable;
 class TableReader;
 
 class SstTemp;
+class SlaAdmin;
 
 // Mutant design
 // -------------
@@ -46,6 +47,7 @@ class SstTemp;
 // Migration triggerer thread:
 //   checks (hot) SSTable temperatures periodically and when then become cold,
 //   triggers migration.
+
 
 class Mutant {
   // Let's keep a copy here. It gets SIGSEGV everywhere. I suspect the undeterministic behavior is form the race from a lot of the DB
@@ -100,6 +102,8 @@ class Mutant {
 
   bool _initialized = false;
 
+  SlaAdmin* _sla_admin = nullptr;
+
   static Mutant& _GetInst();
 
   Mutant();
@@ -127,7 +131,8 @@ class Mutant {
   void _SstMigrationTriggererSleep();
   void _SstMigrationTriggererWakeup();
 
-  void _SetSstOtt(double sst_ott);
+  void _SlaAdminInit(double target_lat, double p, double i, double d);
+  void _SlaAdminAdjust(double lat);
 
   void _Shutdown();
 
@@ -149,7 +154,12 @@ public:
 
   static FileMetaData* PickColdestSstForMigration(int& level_for_migration);
 
-  static void SetSstOtt(double sst_ott);
+  void SlaAdminInit(double target_lat, double p, double i, double d);
+
+  // We play with the average read latency. It is a client-observed latency, but can be embedded in the DB as well.
+  //   An advantage of the client-observed one is that the DB doesn't need to know the specifics of the storage such as cost.
+  //     It can be configured from outside.
+  void SlaAdminAdjust(double lat);
 
   static void Shutdown();
 

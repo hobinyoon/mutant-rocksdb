@@ -124,6 +124,52 @@ public:
 };
 
 
+// https://en.wikipedia.org/wiki/PID_controller
+class SlaAdmin {
+  double _target_value;
+  double _p;
+  // Since the integral term responds to accumulated errors from the past, it can cause the present value to overshoot the setpoint value
+  double _i;
+  // Derivative action predicts system behavior and thus improves settling time and stability of the system.
+  // Derivative action is seldom used in practice though – by one estimate in only 25% of deployed controllers – because of its variable
+  // impact on system stability in real-world applications.
+  double _d;
+
+  double _prev_error = 0.0;
+  double _integral = 0.0;
+
+  boost::posix_time::ptime _prev_ts;
+  bool _prev_ts_defined = false;
+
+public:
+  SlaAdmin(double target_value, double p, double i, double d)
+    : _target_value(target_value), _p(p), _i(i), _d(d)
+  { }
+
+  virtual ~SlaAdmin() { }
+
+  // Calc an adjustment to the controlling value.
+  double CalcAdj(double cur_value) {
+    double error = _target_value - cur_value;
+    boost::posix_time::ptime ts = boost::posix_time::microsec_clock::local_time();
+
+    // No integral or derivative term on the first fun
+    double derivative = 0.0;
+    if (_prev_ts_defined) {
+      long dt = (ts - _prev_ts).total_milliseconds();
+      _integral += (error * dt);
+      derivative = (error - _prev_error) / dt;
+    }
+
+    _prev_error = error;
+    _prev_ts = ts;
+    _prev_ts_defined = true;
+
+    return _p * error + _i * _integral + _d * derivative;
+  }
+};
+
+
 Mutant& Mutant::_GetInst() {
   static Mutant i;
   return i;
@@ -179,11 +225,11 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
     _simulation_time_dur_over_simulated = 1.0;
   }
 
-	JSONWriter jwriter;
-	EventHelpers::AppendCurrentTime(&jwriter);
-	jwriter << "mutant_initialized";
-	jwriter.EndObject();
-	_logger->Log(jwriter);
+  JSONWriter jwriter;
+  EventHelpers::AppendCurrentTime(&jwriter);
+  jwriter << "mutant_initialized";
+  jwriter.EndObject();
+  _logger->Log(jwriter);
 
   // Let the threads start here! In the constructor, some of the members are not set yet.
   if (_temp_updater_thread)
@@ -199,8 +245,8 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
 
 
 void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
-	if (! _initialized)
-		return;
+  if (! _initialized)
+    return;
   if (! _options.monitor_temp)
     return;
 
@@ -228,8 +274,8 @@ void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
 
 
 void Mutant::_MemtDeleted(MemTable* m) {
-	if (! _initialized)
-		return;
+  if (! _initialized)
+    return;
   if (! _options.monitor_temp)
     return;
 
@@ -256,8 +302,8 @@ void Mutant::_MemtDeleted(MemTable* m) {
 
 
 void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
-	if (! _initialized)
-		return;
+  if (! _initialized)
+    return;
   if (! _options.monitor_temp)
     return;
 
@@ -279,8 +325,8 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
 
 
 void Mutant::_SstClosed(BlockBasedTable* bbt) {
-	if (! _initialized)
-		return;
+  if (! _initialized)
+    return;
   if (! _options.monitor_temp)
     return;
 
@@ -309,8 +355,8 @@ void Mutant::_SstClosed(BlockBasedTable* bbt) {
 
 
 void Mutant::_SetUpdated() {
-	if (! _initialized)
-		return;
+  if (! _initialized)
+    return;
   if (! _options.monitor_temp)
     return;
 
@@ -336,8 +382,8 @@ uint32_t Mutant::_CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
     const std::vector<FileMetaData*>& file_metadata,
     int output_level) {
-	if (! _initialized)
-		return 0;
+  if (! _initialized)
+    return 0;
   if (! _options.monitor_temp)
     return 0;
   if (! _options.migrate_sstables)
@@ -417,8 +463,8 @@ uint32_t Mutant::_CalcOutputPathId(
 uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   uint32_t path_id = fmd->fd.GetPathId();
 
-	if (! _initialized)
-		return path_id;
+  if (! _initialized)
+    return path_id;
   if (! _options.monitor_temp)
     return path_id;
   if (! _options.migrate_sstables)
@@ -475,8 +521,8 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
 
 // Returns nullptr when there is no SSTable for migration
 FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
-	if (! _initialized)
-		return nullptr;
+  if (! _initialized)
+    return nullptr;
   if (! _options.monitor_temp)
     return nullptr;
   if (! _options.migrate_sstables)
@@ -758,14 +804,32 @@ void Mutant::_SstMigrationTriggererWakeup() {
 }
 
 
-void Mutant::_SetSstOtt(double sst_ott) {
-  _sst_ott = sst_ott;
+void Mutant::_SlaAdminInit(double target_lat, double p, double i, double d) {
+  static mutex m;
+  lock_guard<mutex> _(m);
+  if (_sla_admin == nullptr) {
+    _sla_admin = new SlaAdmin(target_lat, p, i, d);
+  }
+}
+
+
+void Mutant::_SlaAdminAdjust(double lat) {
+  if (_sla_admin == nullptr)
+    THROW("Unexpected");
+
+  _sst_ott += _sla_admin->CalcAdj(lat);
 }
 
 
 void Mutant::_Shutdown() {
   if (! _initialized)
     return;
+
+  static mutex m;
+  lock_guard<mutex> _(m);
+
+  if (_sla_admin)
+    delete _sla_admin;
 
   _smt_stop_requested = true;
   _SstMigrationTriggererWakeup();
@@ -776,7 +840,7 @@ void Mutant::_Shutdown() {
   }
 
   {
-    lock_guard<mutex> _(_temp_updating_mutex);
+    lock_guard<mutex> _2(_temp_updating_mutex);
     _temp_updater_stop_requested = true;
     _TempUpdaterWakeup();
   }
@@ -905,9 +969,15 @@ FileMetaData* Mutant::PickColdestSstForMigration(int& level_for_migration) {
 }
 
 
-void Mutant::SetSstOtt(double sst_ott) {
+void Mutant::SlaAdminInit(double target_lat, double p, double i, double d) {
+  static Mutant& i_ = _GetInst();
+  i_._SlaAdminInit(target_lat, p, i, d);
+}
+
+
+void Mutant::SlaAdminAdjust(double lat) {
   static Mutant& i = _GetInst();
-  i._SetSstOtt(sst_ott);
+  i._SlaAdminAdjust(lat);
 }
 
 
