@@ -73,10 +73,15 @@ class Mutant {
   //
   // Note: disable MemTable monitoring when measuring the monitoring overhead.
   std::set<MemTable*> _memtSet;
+  std::mutex _memtSetLock_OpenedClosed;
   std::mutex _memtSetLock;
 
   // map<sst_id, SstTemp*>
   std::map<uint64_t, SstTemp*> _sstMap;
+  // The first lock is held when reading/updating SstTemp
+  // The second lock is held when modifying the map
+  // See _SstClosed() why this 2-level locking is needed. A deadlock happens without this.
+  std::mutex _sstMapLock_OpenedClosed;
   std::mutex _sstMapLock;
 
   std::thread* _temp_updater_thread = nullptr;

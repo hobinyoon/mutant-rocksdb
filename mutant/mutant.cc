@@ -52,7 +52,7 @@ class SstTemp {
   //bool _became_cold_at_defined = false;
 
 public:
-  // This is called by _SstOpened() with _sstMapLock held.
+  // This is called by _SstOpened() with the locks (_sstMapLock_OpenedClosed, _sstMapLock) held.
   SstTemp(TableReader* tr, const FileDescriptor* fd, int level)
   : _tr(tr)
     , _created(boost::posix_time::microsec_clock::local_time())
@@ -176,11 +176,15 @@ public:
     // No integral or derivative term on the first fun
     double derivative = 0.0;
     double dt = 0.0;
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     if (_prev_ts_defined) {
       dt = (ts - _prev_ts).total_milliseconds() / 1000.0;
       _integral += (error * dt);
-      derivative = (error - _prev_error) / dt;
+      if (dt != 0.0) {
+        derivative = (error - _prev_error) / dt;
+      }
     }
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
     _prev_error = error;
     _prev_ts = ts;
@@ -279,7 +283,7 @@ void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
   if (! _options.monitor_temp)
     return;
 
-  lock_guard<mutex> lk(_memtSetLock);
+  lock_guard<mutex> lk(_memtSetLock_OpenedClosed);
 
   if (_cfd == nullptr) {
     _cfd = cfd;
@@ -292,6 +296,7 @@ void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
 
   auto it = _memtSet.find(m);
   if (it == _memtSet.end()) {
+    lock_guard<mutex> lk2(_memtSetLock);
     _memtSet.insert(m);
     // Note: Log creation/deletion time, if needed. You don't need to wake up
     // the temp_updater thread.
@@ -307,7 +312,7 @@ void Mutant::_MemtDeleted(MemTable* m) {
   if (! _options.monitor_temp)
     return;
 
-  lock_guard<mutex> lk(_memtSetLock);
+  lock_guard<mutex> lk(_memtSetLock_OpenedClosed);
 
   //TRACE << boost::format("MemtDeleted %p\n") % m;
 
@@ -322,6 +327,8 @@ void Mutant::_MemtDeleted(MemTable* m) {
   } else {
     // Update temp and report for the last time before erasing the entry
     _RunTempUpdaterAndWait();
+
+    lock_guard<mutex> lk2(_memtSetLock);
     _memtSet.erase(it);
   }
 }
@@ -333,7 +340,7 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
   if (! _options.monitor_temp)
     return;
 
-  lock_guard<mutex> lk(_sstMapLock);
+  lock_guard<mutex> lk(_sstMapLock_OpenedClosed);
 
   uint64_t sst_id = fd->GetNumber();
   SstTemp* st = new SstTemp(tr, fd, level);
@@ -342,6 +349,7 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
 
   auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
+    lock_guard<mutex> lk2(_sstMapLock);
     _sstMap[sst_id] = st;
   } else {
     THROW("Unexpected");
@@ -355,7 +363,7 @@ void Mutant::_SstClosed(BlockBasedTable* bbt) {
   if (! _options.monitor_temp)
     return;
 
-  lock_guard<mutex> lk(_sstMapLock);
+  lock_guard<mutex> lk(_sstMapLock_OpenedClosed);
 
   uint64_t sst_id = bbt->SstId();
   //TRACE << boost::format("%d _SstClosed sst_id=%d\n") % std::this_thread::get_id() % sst_id;
@@ -369,6 +377,10 @@ void Mutant::_SstClosed(BlockBasedTable* bbt) {
     // Update temp and report for the last time before erasing the entry.
     _RunTempUpdaterAndWait();
 
+    // You need a 2-level locking with _sstMapLock_OpenedClosed and _sstMapLock.
+    //   _RunTempUpdaterAndWait() waits for the temp_updater thread to finish a cycle, which
+    //   acquires _sstMapLock. The same goes with _memtSetLock.
+    lock_guard<mutex> lk2(_sstMapLock);
     delete it->second;
     _sstMap.erase(it);
   }
@@ -837,18 +849,24 @@ void Mutant::_SlaAdminAdjust(double lat) {
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   double cur_max_sst_temp = 0.0;
   {
     lock_guard<mutex> l_(_sstMapLock);
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     for (auto i: _sstMap) {
       SstTemp* st = i.second;
+      TRACE << boost::format("%d %d %p\n") % std::this_thread::get_id() % i.first % st;
       cur_max_sst_temp = max(cur_max_sst_temp, st->Temp(cur_time));
+      TRACE << boost::format("%d\n") % std::this_thread::get_id();
     }
   }
 
   // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
   //   E.g., when there is no error, the sst_ott can be like 10.
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   double adj = _sla_admin->CalcAdj(lat, jwriter);
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   double new_sst_ott = _sst_ott + adj;
   // Force sst_ott to be
   //   (a) > 0: Just because a negative value doesn't make any sense.
@@ -874,31 +892,31 @@ void Mutant::_SlaAdminAdjust(double lat) {
   int num_ssts_slow = 0;
   int num_ssts_fast_should_be = 0;
   int num_ssts_slow_should_be = 0;
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   vector<string> sst_status_str;
   {
-    {
-      lock_guard<mutex> l_(_sstMapLock);
-      for (auto i: _sstMap) {
-        uint64_t sst_id = i.first;
-        SstTemp* st = i.second;
-        double temp = st->Temp(cur_time);
-        uint32_t path_id = st->PathId();
-        uint32_t path_id_should_be = (_sst_ott < temp) ? 0 : 1;
-        if (path_id == 0) {
-          num_ssts_fast ++;
-        } else {
-          num_ssts_slow ++;
-        }
-        if (path_id_should_be == 0) {
-          num_ssts_fast_should_be ++;
-        } else {
-          num_ssts_slow_should_be ++;
-        }
-        sst_status_str.push_back(str(boost::format("%d:%d:%.3f:%d:%d")
-              % sst_id % st->Level() % temp % path_id % path_id_should_be));
+    lock_guard<mutex> l_(_sstMapLock);
+    for (auto i: _sstMap) {
+      uint64_t sst_id = i.first;
+      SstTemp* st = i.second;
+      double temp = st->Temp(cur_time);
+      uint32_t path_id = st->PathId();
+      uint32_t path_id_should_be = (_sst_ott < temp) ? 0 : 1;
+      if (path_id == 0) {
+        num_ssts_fast ++;
+      } else {
+        num_ssts_slow ++;
       }
+      if (path_id_should_be == 0) {
+        num_ssts_fast_should_be ++;
+      } else {
+        num_ssts_slow_should_be ++;
+      }
+      sst_status_str.push_back(str(boost::format("%d:%d:%.3f:%d:%d")
+            % sst_id % st->Level() % temp % path_id % path_id_should_be));
     }
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   jwriter << "sst_status" << boost::algorithm::join(sst_status_str, " ");
   jwriter << "num_ssts_in_fast_dev" << num_ssts_fast;
   jwriter << "num_ssts_in_slow_dev" << num_ssts_slow;
