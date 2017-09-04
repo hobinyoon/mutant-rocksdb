@@ -176,7 +176,6 @@ public:
     // No integral or derivative term on the first fun
     double derivative = 0.0;
     double dt = 0.0;
-    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     if (_prev_ts_defined) {
       dt = (ts - _prev_ts).total_milliseconds() / 1000.0;
       _integral += (error * dt);
@@ -184,7 +183,6 @@ public:
         derivative = (error - _prev_error) / dt;
       }
     }
-    TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
     _prev_error = error;
     _prev_ts = ts;
@@ -849,24 +847,18 @@ void Mutant::_SlaAdminAdjust(double lat) {
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   double cur_max_sst_temp = 0.0;
   {
     lock_guard<mutex> l_(_sstMapLock);
-    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     for (auto i: _sstMap) {
       SstTemp* st = i.second;
-      TRACE << boost::format("%d %d %p\n") % std::this_thread::get_id() % i.first % st;
       cur_max_sst_temp = max(cur_max_sst_temp, st->Temp(cur_time));
-      TRACE << boost::format("%d\n") % std::this_thread::get_id();
     }
   }
 
   // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
   //   E.g., when there is no error, the sst_ott can be like 10.
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   double adj = _sla_admin->CalcAdj(lat, jwriter);
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   double new_sst_ott = _sst_ott + adj;
   // Force sst_ott to be
   //   (a) > 0: Just because a negative value doesn't make any sense.
@@ -892,7 +884,6 @@ void Mutant::_SlaAdminAdjust(double lat) {
   int num_ssts_slow = 0;
   int num_ssts_fast_should_be = 0;
   int num_ssts_slow_should_be = 0;
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   vector<string> sst_status_str;
   {
     lock_guard<mutex> l_(_sstMapLock);
@@ -916,7 +907,6 @@ void Mutant::_SlaAdminAdjust(double lat) {
             % sst_id % st->Level() % temp % path_id % path_id_should_be));
     }
   }
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   jwriter << "sst_status" << boost::algorithm::join(sst_status_str, " ");
   jwriter << "num_ssts_in_fast_dev" << num_ssts_fast;
   jwriter << "num_ssts_in_slow_dev" << num_ssts_slow;
