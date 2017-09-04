@@ -126,7 +126,7 @@ class Mutant {
       const std::vector<FileMetaData*>& file_metadata,
       int output_level);
   uint32_t _CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
-  FileMetaData*_PickColdestSstForMigration(int& level_for_migration);
+  FileMetaData*_PickSstToMigrate(int& level_for_migration);
 
   void _TempUpdaterRun();
   void _TempUpdaterSleep();
@@ -157,7 +157,7 @@ public:
       int output_level);
   static uint32_t CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
 
-  static FileMetaData* PickColdestSstForMigration(int& level_for_migration);
+  static FileMetaData* PickSstToMigrate(int& level_for_migration);
 
   static void SlaAdminInit(double target_lat, double p, double i, double d);
 

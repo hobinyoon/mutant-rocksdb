@@ -461,16 +461,17 @@ uint32_t Mutant::_CalcOutputPathId(
           % sst_id % _SstLevel(sst_id) % path_id % temp));
   }
 
-  // Output path_id starts from the min of input path_ids
+  // output_path_id starts from the min of input path_ids in case none of the temperatures is defined.
   uint32_t output_path_id = *std::min_element(input_sst_path_id.begin(), input_sst_path_id.end());
 
-  // If the average input SSTable tempereture is below a threshold, set the
-  // output path_id accordingly.
+  // If the average input SSTable tempereture is below sst_ott, output_path_id = 1.
   //
   // This needs to be the weighted average using the input SSTable sizes. To be precise. It's ok for now.
   if (input_sst_temp.size() > 0) {
     double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
-    if (avg < _sst_ott) {
+    if (_sst_ott < avg) {
+      output_path_id = 0;
+    } else {
       output_path_id = 1;
     }
   }
@@ -504,63 +505,58 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   if (! _options.migrate_sstables)
     return path_id;
 
-  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
-
   uint64_t sst_id = fmd->fd.GetNumber();
-
   uint32_t output_path_id = path_id;
 
-  // -2.0, when path_id = 1, which can be ignored.
-  double temp = -2.0;
-
-  if (path_id == 1) {
-    // Cold SSTables stay cold
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+  double temp = _SstTemperature(sst_id, cur_time);
+  if (temp == -1.0) {
+    // When undefined, keep the current path_id
   } else {
-    temp = _SstTemperature(sst_id, cur_time);
-    if ((temp != -1.0) && (temp < _sst_ott)) {
+    if (_sst_ott < temp) {
+      output_path_id = 0;
+    } else {
       output_path_id = 1;
     }
   }
 
-  {
-    string input_sst_info = str(boost::format("sst_id=%d level=%d path_id=%d temp=%.3f")
-        % sst_id % _SstLevel(sst_id) % path_id % temp);
-
-    JSONWriter jwriter;
-    EventHelpers::AppendCurrentTime(&jwriter);
-    jwriter << "mutant_trivial_move";
-    jwriter.StartObject();
-    jwriter << "in_sst" << input_sst_info;
-    jwriter << "out_sst_path_id" << output_path_id;
-    jwriter.EndObject();
-    jwriter.EndObject();
-    _logger->Log(jwriter);
-  }
+  JSONWriter jwriter;
+  EventHelpers::AppendCurrentTime(&jwriter);
+  jwriter << "mutant_trivial_move";
+  jwriter.StartObject();
+  jwriter << "sst_id" << sst_id;
+  jwriter << "level" << _SstLevel(sst_id);
+  jwriter << "path_id" << path_id;
+  jwriter << "temp" << temp;
+  jwriter << "output_path_id" << output_path_id;
+  jwriter.EndObject();
+  jwriter.EndObject();
+  _logger->Log(jwriter);
 
   return output_path_id;
 }
 
-
+// Pick an SSTable to migrate.
+//   When moving an SSTable to fast dev, pick the hottest one over sst_ott.
+//   When moving an SSTable to slow dev, pick the coldest one over sst_ott.
 // Returns nullptr when there is no SSTable for migration
-FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
+FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
   if (! _initialized)
     return nullptr;
   if (! _options.monitor_temp)
     return nullptr;
   if (! _options.migrate_sstables)
     return nullptr;
+  if (! _db)
+    return nullptr;
 
-  FileMetaData* fmd_with_temp_min = nullptr;
-
-  if (!_db)
-    return fmd_with_temp_min;
-
-  // To minimize calling GetMetadataForFile(), we first get a sorted list of
-  // sst_ids by their temperature.  GetMetadataForFile() is not very efficient,
-  // it has a nested loop.
+  // To minimize calling GetMetadataForFile(), we first get a sorted list of sst_ids by their temperature.
+  //   GetMetadataForFile() is not very efficient; it has a nested loop.
   //
+  // Cold SSTables in fast device. Hot SSTables in slow device.
   // map<temp, sst_id>
-  map<double, uint64_t> temp_sstid;
+  map<double, uint64_t> temp_sstid_in_fast_dev;
+  map<double, uint64_t> temp_sstid_in_slow_dev;
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
@@ -576,41 +572,74 @@ FileMetaData* Mutant::_PickColdestSstForMigration(int& level_for_migration) {
     if ((!_options.organize_L0_sstables) && level == 0)
       continue;
 
-    // TODO: Revisit this for multi-level path_ids. 2-level for now.
-    if (st->PathId() > 0)
+    double temp = st->Temp(cur_time);
+    if (temp == TEMP_UNINITIALIZED)
       continue;
 
-    double temp = st->Temp(cur_time);
-    if ((temp != TEMP_UNINITIALIZED) && (temp < _sst_ott))
-      temp_sstid[temp] = sst_id;
+    uint32_t path_id = st->PathId();
+    if (path_id == 0) {
+      if (temp < _sst_ott)
+        temp_sstid_in_fast_dev[temp] = sst_id;
+    } else {
+      if (_sst_ott < temp)
+        temp_sstid_in_slow_dev[temp] = sst_id;
+    }
   }
 
-  for (auto i: temp_sstid) {
-    uint64_t sst_id = i.second;
+  // Get the hottest sstable above sst_ott first. We do this first since we favor low latency, in case there are SSTables to be organized on both
+  // sides of sst_ott.
+  for (auto it = temp_sstid_in_slow_dev.rbegin(); it != temp_sstid_in_slow_dev.rend(); it ++) {
+    uint64_t sst_id = it->second;
 
     int filelevel;
-    FileMetaData* fmd;
+    FileMetaData* fmd = nullptr;
     ColumnFamilyData* cfd;
     Status s = _db->MutantGetMetadataForFile(sst_id, &filelevel, &fmd, &cfd);
     if (s.code() == Status::kNotFound) {
       // This rarely happens, but happens. Ignore the sst.
       continue;
-    } else {
-      if (!s.ok())
-        THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
     }
+    if (!s.ok())
+      THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
+    if (!fmd)
+      THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
 
     if (fmd->being_compacted)
       continue;
 
-    fmd_with_temp_min = fmd;
     level_for_migration = filelevel;
+
+    // There is no guarantee that the fmd points to a live SSTable after it is
+    // returned. I think the sames goes with the regular compaction picking path.
+    // Hope the compaction implementation takes care of it.
+    return fmd;
   }
 
-  // There is no guarantee that the fmd points to a live SSTable after it is
-  // returned. I think the sames goes with the regular compaction picking path.
-  // Hope the compaction implementation takes care of it.
-  return fmd_with_temp_min;
+  // Get the coldest sst below sst_ott
+  for (auto it = temp_sstid_in_fast_dev.begin(); it != temp_sstid_in_fast_dev.end(); it ++) {
+    uint64_t sst_id = it->second;
+
+    int filelevel;
+    FileMetaData* fmd = nullptr;
+    ColumnFamilyData* cfd;
+    Status s = _db->MutantGetMetadataForFile(sst_id, &filelevel, &fmd, &cfd);
+    if (s.code() == Status::kNotFound) {
+      continue;
+    }
+    if (!s.ok())
+      THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
+    if (!fmd)
+      THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
+
+    if (fmd->being_compacted)
+      continue;
+
+    level_for_migration = filelevel;
+    return fmd;
+  }
+
+  // No SSTable to migrate.
+  return nullptr;
 }
 
 
@@ -751,11 +780,10 @@ void Mutant::_RunTempUpdaterAndWait() {
 }
 
 
-// This thread schedules a background SSTable compaction when there may be a
-// cold SSTable.
+// Schedule a background SSTable compaction when there may be an SSTable to be migrated.
 //
-// When you schedule a background compaction and there is no compaction to do,
-// you get "Compaction nothing to do".
+// When you schedule a background compaction and there is no compaction to do, you get a "Compaction nothing to do".
+//   Though seems harmless, you don't want unnecessarily scheduling of compactions.
 void Mutant::_SstMigrationTriggererRun() {
   try {
     while (! _smt_stop_requested) {
@@ -764,14 +792,12 @@ void Mutant::_SstMigrationTriggererRun() {
       if (!_cfd)
         continue;
 
+      // Regular compactions takes priority over temperature-triggered compactions.
       if (_db->UnscheduledCompactions() > 0)
         continue;
 
-      // Schedule only when there is a cold SSTable to avoid scheduling too
-      // many compactions that end up doing nothing.
-      //
-      // A simpler, is-there-any-cold-SSTable check. The full check is done
-      // later in _PickColdestSstForMigration().
+      // Schedule a compaction only when there is an SSTable to be compacted.
+      //   This is an initial, quick check. _PickSstToMigrate() does a full check later.
       bool may_have_sstable_to_migrate = false;
       boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
       {
@@ -782,18 +808,24 @@ void Mutant::_SstMigrationTriggererRun() {
           // We don't consider level -1 (there used to be, not anymore).
           if (level < 0)
             continue;
-
           if ((!_options.organize_L0_sstables) && level == 0)
             continue;
 
-          // TODO: Revisit this for multi-level path_ids. 2-level for now.
-          if (st->PathId() > 0)
+          double temp = st->Temp(cur_time);
+          if (temp == TEMP_UNINITIALIZED)
             continue;
 
-          double temp = st->Temp(cur_time);
-          if ((temp != TEMP_UNINITIALIZED) && (temp < _sst_ott)) {
-            may_have_sstable_to_migrate = true;
-            break;
+          uint32_t path_id = st->PathId();
+          if (path_id == 0) {
+            if (temp < _sst_ott) {
+              may_have_sstable_to_migrate = true;
+              break;
+            }
+          } else {
+            if (_sst_ott < temp) {
+              may_have_sstable_to_migrate = true;
+              break;
+            }
           }
         }
       }
@@ -1061,9 +1093,9 @@ uint32_t Mutant::CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
 }
 
 
-FileMetaData* Mutant::PickColdestSstForMigration(int& level_for_migration) {
+FileMetaData* Mutant::PickSstToMigrate(int& level_for_migration) {
   static Mutant& i = _GetInst();
-  return i._PickColdestSstForMigration(level_for_migration);
+  return i._PickSstToMigrate(level_for_migration);
 }
 
 

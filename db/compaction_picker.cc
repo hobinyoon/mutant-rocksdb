@@ -879,18 +879,15 @@ void LevelCompactionPicker::PickFilesMarkedForCompactionExperimental(
     bool& temperature_triggered_single_sstable_compaction) {
   temperature_triggered_single_sstable_compaction = false;
   if (vstorage->FilesMarkedForCompaction().empty()) {
-    // Mutant: when there is nothing left for compaction, do a
-    // temperature-triggered compaction (migration).  Pick the coldest one that
-    // are under the temperature threshold.
+    // Mutant: When there is nothing left for compaction, do a temperature-triggered compaction (migration).
     //
-    // In PickColdestSstForMigration(), we use MutantGetMetadataForFile() to get
-    // FileMetaData*.  Tried vstorage->files_ to get FileMetaData*, but it
-    // doesn't have a recent snapshot, and didn't want to messup with its
-    // versioning by calling SaveTo().
+    // In Mutant::PickSstToMigrate(), we use MutantGetMetadataForFile() to get FileMetaData*.
+    //   Tried vstorage->files_ to get FileMetaData*, but it didn't have a recent snapshot, and didn't want to mess up with its versioning
+    //   by calling SaveTo().
     //
     // Here, you don't know the output SSTable level yet.
     int level_for_migration = -1;
-    FileMetaData* fmd = Mutant::PickColdestSstForMigration(level_for_migration);
+    FileMetaData* fmd = Mutant::PickSstToMigrate(level_for_migration);
     if (fmd == nullptr) {
       // No SSTable suitable for migration
       return;
@@ -1061,7 +1058,7 @@ Compaction* LevelCompactionPicker::PickCompaction(
   // Mutant doesn't move SSTables with output_level 0, since it takes too much
   // read requests.
   //
-  // Mutant does logging inside CalcOutputPathId(). I don't like the format of this
+  // Mutant does logging inside CalcOutputPathId(). I didn't like the format of this
   // LogToBuffer(log_buffer, "[%s] Mutant AAA\n", cf_name.c_str());
   // 2017/01/08-23:05:48.070539 7fd970f45700 (Original Log Time 2017/01/08-23:05:48.070517) [default] Mutant AAA
   uint32_t output_path_id = Mutant::CalcOutputPathId(
