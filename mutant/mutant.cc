@@ -170,7 +170,12 @@ public:
 
   // Calc an adjustment to the controlling value.
   double CalcAdj(double cur_value, JSONWriter& jwriter) {
+    // Prevent suddern peaks lowering sst_ott too fast
+    if (_target_value * 2.0 < cur_value)
+      cur_value = _target_value * 2.0;
+
     double error = _target_value - cur_value;
+
     boost::posix_time::ptime ts = boost::posix_time::microsec_clock::local_time();
 
     // No integral or derivative term on the first fun
