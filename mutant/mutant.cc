@@ -897,10 +897,14 @@ void Mutant::_SlaAdminAdjust(double lat) {
   //     I dont't think it's harmful though. It means keeping all SSTables in fast device. But still feels strange.
   //   (b) < _cur_sst_tmp_max: not to set it to far.
   //   The temporary variable is to avoid other threads accessing the intermediate value.
-  if (new_sst_ott < 0.0)
-    new_sst_ott = 0.0;
-  if (cur_max_sst_temp < new_sst_ott)
-    new_sst_ott = cur_max_sst_temp;
+  // TODO: parameterize
+  bool cap_sst_ott = true;
+  if (cap_sst_ott) {
+    if (new_sst_ott < 0.0)
+      new_sst_ott = 0.0;
+    if (cur_max_sst_temp < new_sst_ott)
+      new_sst_ott = cur_max_sst_temp;
+  }
   _sst_ott = new_sst_ott;
 
   jwriter << "sst_ott" << _sst_ott;;
