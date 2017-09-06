@@ -911,7 +911,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
   //   E.g., when there is no error, the sst_ott can be like 10.
   double adj = _sla_admin->CalcAdj(lat, jwriter);
 
-  bool exponential_adj = true;
+  bool exponential_adj = false;
   double new_sst_ott;
   if (exponential_adj) {
     if (0 < adj) {
