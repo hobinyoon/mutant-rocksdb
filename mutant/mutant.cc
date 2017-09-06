@@ -176,7 +176,7 @@ public:
 
     double error;
     // When cur_value is a bit less than _target_value, take it as stabilized.
-    if ( (_target_value * 0.9 < cur_value) && (cur_value < _target_value) ) {
+    if ( (_target_value * 0.95 < cur_value) && (cur_value < _target_value) ) {
       error = 0.0;
     } else {
       error = _target_value - cur_value;
