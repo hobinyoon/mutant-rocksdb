@@ -176,7 +176,7 @@ public:
 
     double error;
     // When cur_value is a bit less than _target_value, take it as stabilized.
-    if ( (_target_value * 0.95 < cur_value) && (cur_value < _target_value) ) {
+    if ( (_target_value * 0.95 < cur_value) && (cur_value < _target_value * 1.05) ) {
       error = 0.0;
     } else {
       error = _target_value - cur_value;
@@ -891,30 +891,50 @@ void Mutant::_SlaAdminAdjust(double lat) {
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
   double cur_max_sst_temp = 0.0;
+  double cur_min_sst_temp = 0.0;
+  bool first = true;
   {
     lock_guard<mutex> l_(_sstMapLock);
     for (auto i: _sstMap) {
       SstTemp* st = i.second;
-      cur_max_sst_temp = max(cur_max_sst_temp, st->Temp(cur_time));
+      if (first) {
+        cur_max_sst_temp = cur_min_sst_temp = st->Temp(cur_time);
+        first = false;
+      } else {
+        cur_max_sst_temp = max(cur_max_sst_temp, st->Temp(cur_time));
+        cur_min_sst_temp = min(cur_min_sst_temp, st->Temp(cur_time));
+      }
     }
   }
 
   // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
   //   E.g., when there is no error, the sst_ott can be like 10.
   double adj = _sla_admin->CalcAdj(lat, jwriter);
-  double new_sst_ott = _sst_ott + adj;
+
+  bool exponential_adj = true;
+  double new_sst_ott;
+  if (exponential_adj) {
+    if (0 < adj) {
+      new_sst_ott = _sst_ott * 1.05;
+    } else {
+      new_sst_ott = _sst_ott / 1.05;
+    }
+  } else {
+    new_sst_ott = _sst_ott + adj;
+  }
+
   // Force sst_ott to be
   //   (a) > 0: Just because a negative value doesn't make any sense.
   //     I dont't think it's harmful though. It means keeping all SSTables in fast device. But still feels strange.
   //   (b) < _cur_sst_tmp_max: not to set it to far.
   //   The temporary variable is to avoid other threads accessing the intermediate value.
-  // TODO: parameterize
   bool cap_sst_ott = true;
   if (cap_sst_ott) {
-    if (new_sst_ott < 0.0)
-      new_sst_ott = 0.0;
-    if (cur_max_sst_temp < new_sst_ott)
+    if (new_sst_ott < cur_min_sst_temp) {
+      new_sst_ott = cur_min_sst_temp;
+    } else if (cur_max_sst_temp < new_sst_ott) {
       new_sst_ott = cur_max_sst_temp;
+    }
   }
   _sst_ott = new_sst_ott;
 
