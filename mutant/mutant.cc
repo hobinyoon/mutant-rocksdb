@@ -882,6 +882,9 @@ void Mutant::_SlaAdminAdjust(double lat) {
   if (_sla_admin == nullptr)
     THROW("Unexpected");
 
+  if (! _options.sla_admin)
+    return;
+
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
   jwriter << "mutant_sla_admin_adjust";

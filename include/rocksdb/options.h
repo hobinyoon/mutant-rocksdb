@@ -1374,6 +1374,8 @@ struct DBOptions {
     double simulated_time_dur_sec;
     double simulation_time_dur_sec;
 
+    bool sla_admin;
+
     // Create MutantOptions with default values for all fields
     MutantOptions();
   };

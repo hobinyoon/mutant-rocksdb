@@ -876,6 +876,7 @@ DBOptions::MutantOptions::MutantOptions()
     , replaying(false)
     , simulated_time_dur_sec(0.0)
     , simulation_time_dur_sec(0.0)
+    , sla_admin(false)
 {
 }
 
