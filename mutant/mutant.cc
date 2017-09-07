@@ -911,6 +911,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
   //   E.g., when there is no error, the sst_ott can be like 10.
   double adj = _sla_admin->CalcAdj(lat, jwriter);
 
+  // TODO: update _sst_ott so that only one SSTable can be moved at a time. After moving one, wait for 2 seconds before making another adjustment.
   bool exponential_adj = false;
   double new_sst_ott;
   if (exponential_adj) {
