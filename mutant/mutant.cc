@@ -909,7 +909,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
   jwriter << "lat_running_avg" << lat_running_avg;
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
-  _AdjSstOtt(lat_running_avg, cur_time, jwriter);
+  _AdjSstOtt(lat_running_avg, cur_time, &jwriter);
 
   jwriter << "sst_ott" << _sst_ott;
 
@@ -1010,7 +1010,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
 
 
 // Simple P-only, threshold-based SLA control
-void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter& jwriter) {
+void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter) {
   const double error_margin = 0.05;
   //  1: Current latency is lower than the target latency. Move an SSTable to the slow device.
   //  0: Current latency is within the error bound of the target latency. No adjustment.
@@ -1020,7 +1020,7 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
     sst_ott_adj = 1;
   } else if (cur_value < _target_lat * (1 + error_margin)) {
     // No adjustment
-    jwriter << "adj_type" << "within_error_margin";
+    (*jwriter) << "adj_type" << "within_error_margin";
     return;
   } else {
     sst_ott_adj = -1;
@@ -1038,7 +1038,7 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
   int s = sst_temps.size();
   if (s == 0) {
     // No adjustment when there is no SSTable
-    jwriter << "adj_type" << "no_sstable";
+    (*jwriter) << "adj_type" << "no_sstable";
     return;
   }
 
@@ -1058,17 +1058,17 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
   double new_sst_ott;
   if (i <= 0) {
     new_sst_ott = sst_temps[0] - 1.0;
-    jwriter << "adj_type" << "no_inter_sst_change_lowest";
+    (*jwriter) << "adj_type" << "no_inter_sst_change_lowest";
   } else if (s <= i) {
     new_sst_ott = sst_temps[s-1] + 1.0;
-    jwriter << "adj_type" << "no_inter_sst_change_highest";
+    (*jwriter) << "adj_type" << "no_inter_sst_change_highest";
   } else {
     // Take the average when (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
     new_sst_ott = (sst_temps[i-1] + sst_temps[i]) / 2.0;
     if (sst_ott_adj == 1) {
-      jwriter << "adj_type" << "move_sst_to_slow";
+      (*jwriter) << "adj_type" << "move_sst_to_slow";
     } else if (sst_ott_adj == -1) {
-      jwriter << "adj_type" << "move_sst_to_fast";
+      (*jwriter) << "adj_type" << "move_sst_to_fast";
     }
   }
   _sst_ott = new_sst_ott;

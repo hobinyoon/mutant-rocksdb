@@ -10,7 +10,6 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 #include "rocksdb/options.h"
-#include "util/event_logger.h"
 
 
 namespace rocksdb {
@@ -21,6 +20,7 @@ class DBImpl;
 class EventLogger;
 struct FileDescriptor;
 struct FileMetaData;
+struct JSONWriter;
 class MemTable;
 class TableReader;
 
@@ -142,7 +142,7 @@ class Mutant {
 
   void _SlaAdminInit(double target_lat, double p, double i, double d);
   void _SlaAdminAdjust(double lat);
-  void _AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter& jwriter);
+  void _AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter);
 
   void _Shutdown();
 
