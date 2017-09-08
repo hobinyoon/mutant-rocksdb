@@ -357,12 +357,15 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
 
   //TRACE << boost::format("%d SstOpened sst_id=%d\n") % std::this_thread::get_id() % sst_id;
 
+  lock_guard<mutex> lk2(_sstMapLock);
   auto it = _sstMap.find(sst_id);
   if (it == _sstMap.end()) {
-    lock_guard<mutex> lk2(_sstMapLock);
     _sstMap[sst_id] = st;
   } else {
-    THROW("Unexpected");
+    // This happens. Interesting. Update the map.
+    delete it->second;
+    _sstMap[sst_id] = st;
+    TRACE << boost::format("%d Interesting! sst_id=%d\n%s\n") % std::this_thread::get_id() % sst_id % Util::StackTrace(1);
   }
 }
 
