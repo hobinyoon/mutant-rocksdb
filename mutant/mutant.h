@@ -111,6 +111,9 @@ class Mutant {
   double _target_lat = -1.0;
   std::deque<double> _lat_hist;
 
+  std::mutex _no_comp_flush_cnt_lock;
+  int _no_comp_flush_cnt = 0;
+
   static Mutant& _GetInst();
 
   Mutant();

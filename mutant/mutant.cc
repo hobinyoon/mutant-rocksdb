@@ -890,13 +890,36 @@ void Mutant::_SlaAdminAdjust(double lat) {
   if (! _options.sla_admin)
     return;
 
-  // TODO: no adjustment during a grace period
+  // No adjustment while either a flush or a compaction is running.
+  bool make_adjustment = false;
+  {
+    uint64_t num_running_compactions = 0;
+    uint64_t num_running_flushes = 0;
+    _db->GetIntProperty(DB::Properties::kNumRunningCompactions, &num_running_compactions);
+    _db->GetIntProperty(DB::Properties::kNumRunningFlushes, &num_running_flushes);
+
+    lock_guard<mutex> _(_no_comp_flush_cnt_lock);
+    if (num_running_compactions + num_running_flushes == 0) {
+      _no_comp_flush_cnt ++;
+    } else {
+      _no_comp_flush_cnt = 0;
+    }
+
+    make_adjustment = (2 <= _no_comp_flush_cnt);
+  }
 
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
   jwriter << "mutant_sla_admin_adjust";
   jwriter.StartObject();
   jwriter << "cur_lat" << lat;
+  jwriter << "make_adjustment" << make_adjustment;
+
+  if (! make_adjustment) {
+    jwriter.EndObject();
+    jwriter.EndObject();
+    _logger->Log(jwriter);
+  }
 
   // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
   //   E.g., when there is no error, the sst_ott can be like 10.
