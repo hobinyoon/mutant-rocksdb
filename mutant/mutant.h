@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <map>
 #include <mutex>
+#include <deque>
 #include <set>
 #include <thread>
 
@@ -108,6 +109,7 @@ class Mutant {
 
   SlaAdmin* _sla_admin = nullptr;
   double _target_lat = -1.0;
+  std::deque<double> _lat_hist;
 
   static Mutant& _GetInst();
 

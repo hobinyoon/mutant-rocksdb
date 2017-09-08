@@ -893,16 +893,25 @@ void Mutant::_SlaAdminAdjust(double lat) {
   EventHelpers::AppendCurrentTime(&jwriter);
   jwriter << "mutant_sla_admin_adjust";
   jwriter.StartObject();
-  jwriter << "cur_lat" << lat;;
+  jwriter << "cur_lat" << lat;
 
   // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
   //   E.g., when there is no error, the sst_ott can be like 10.
   //double adj = _sla_admin->CalcAdj(lat, jwriter);
 
-  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
-  _AdjSstOtt(lat, cur_time, jwriter);
+  // Use the running average of the last 30 values.
+  if (_lat_hist.size() > 30) {
+    _lat_hist.pop_front();
+  }
+  _lat_hist.push_back(lat);
 
-  jwriter << "sst_ott" << _sst_ott;;
+  double lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
+  jwriter << "lat_running_avg" << lat_running_avg;
+
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+  _AdjSstOtt(lat_running_avg, cur_time, jwriter);
+
+  jwriter << "sst_ott" << _sst_ott;
 
   // TODO: to a separate function
   // List SSTables.
@@ -1063,8 +1072,6 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
     }
   }
   _sst_ott = new_sst_ott;
-
-  // TODO: add some logging
 }
 
 
