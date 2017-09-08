@@ -201,6 +201,7 @@ public:
 
     double adj = _p * error + _i * _integral + _d * derivative;
 
+    // TODO: enclose this with something like cur_pid_values
     jwriter << "dt" << dt;
     jwriter << "p" << error;
     jwriter << "i" << _integral;
@@ -874,6 +875,7 @@ void Mutant::_SlaAdminInit(double target_lat, double p, double i, double d) {
   lock_guard<mutex> _(m);
   if (_sla_admin == nullptr) {
     _sla_admin = new SlaAdmin(target_lat, p, i, d, _logger);
+    _target_lat = target_lat;
   }
 }
 
@@ -885,65 +887,24 @@ void Mutant::_SlaAdminAdjust(double lat) {
   if (! _options.sla_admin)
     return;
 
+  // TODO: no adjustment during a grace period
+
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
   jwriter << "mutant_sla_admin_adjust";
   jwriter.StartObject();
   jwriter << "cur_lat" << lat;;
 
-  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
-
-  double cur_max_sst_temp = 0.0;
-  double cur_min_sst_temp = 0.0;
-  bool first = true;
-  {
-    lock_guard<mutex> l_(_sstMapLock);
-    for (auto i: _sstMap) {
-      SstTemp* st = i.second;
-      if (first) {
-        cur_max_sst_temp = cur_min_sst_temp = st->Temp(cur_time);
-        first = false;
-      } else {
-        cur_max_sst_temp = max(cur_max_sst_temp, st->Temp(cur_time));
-        cur_min_sst_temp = min(cur_min_sst_temp, st->Temp(cur_time));
-      }
-    }
-  }
-
   // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
   //   E.g., when there is no error, the sst_ott can be like 10.
-  double adj = _sla_admin->CalcAdj(lat, jwriter);
+  //double adj = _sla_admin->CalcAdj(lat, jwriter);
 
-  // TODO: update _sst_ott so that only one SSTable can be moved at a time. After moving one, wait for 2 seconds before making another adjustment.
-  bool exponential_adj = false;
-  double new_sst_ott;
-  if (exponential_adj) {
-    if (0 < adj) {
-      new_sst_ott = _sst_ott * 1.05;
-    } else {
-      new_sst_ott = _sst_ott / 1.05;
-    }
-  } else {
-    new_sst_ott = _sst_ott + adj;
-  }
-
-  // Force sst_ott to be
-  //   (a) > 0: Just because a negative value doesn't make any sense.
-  //     I dont't think it's harmful though. It means keeping all SSTables in fast device. But still feels strange.
-  //   (b) < _cur_sst_tmp_max: not to set it to far.
-  //   The temporary variable is to avoid other threads accessing the intermediate value.
-  bool cap_sst_ott = true;
-  if (cap_sst_ott) {
-    if (new_sst_ott < cur_min_sst_temp) {
-      new_sst_ott = cur_min_sst_temp;
-    } else if (cur_max_sst_temp < new_sst_ott) {
-      new_sst_ott = cur_max_sst_temp;
-    }
-  }
-  _sst_ott = new_sst_ott;
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+  _AdjSstOtt(lat, cur_time, jwriter);
 
   jwriter << "sst_ott" << _sst_ott;;
 
+  // TODO: to a separate function
   // List SSTables.
   //   Current temperature.
   //   The current storage device.
@@ -987,6 +948,123 @@ void Mutant::_SlaAdminAdjust(double lat) {
   jwriter.EndObject();
   jwriter.EndObject();
   _logger->Log(jwriter);
+
+#if 0
+  // This is not quite correct
+  double cur_max_sst_temp = 0.0;
+  double cur_min_sst_temp = 0.0;
+  bool first = true;
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+  {
+    lock_guard<mutex> l_(_sstMapLock);
+    for (auto i: _sstMap) {
+      SstTemp* st = i.second;
+      if (first) {
+        cur_max_sst_temp = cur_min_sst_temp = st->Temp(cur_time);
+        first = false;
+      } else {
+        cur_max_sst_temp = max(cur_max_sst_temp, st->Temp(cur_time));
+        cur_min_sst_temp = min(cur_min_sst_temp, st->Temp(cur_time));
+      }
+    }
+  }
+
+  // TODO: update _sst_ott so that only one SSTable can be moved at a time. After moving one, wait for 2 seconds before making another adjustment.
+  bool exponential_adj = false;
+  double new_sst_ott;
+  if (exponential_adj) {
+    if (0 < adj) {
+      new_sst_ott = _sst_ott * 1.05;
+    } else {
+      new_sst_ott = _sst_ott / 1.05;
+    }
+  } else {
+    new_sst_ott = _sst_ott + adj;
+  }
+
+  // Force sst_ott to be
+  //   (a) > 0: Just because a negative value doesn't make any sense.
+  //     I dont't think it's harmful though. It means keeping all SSTables in fast device. But still feels strange.
+  //   (b) < _cur_sst_tmp_max: not to set it to far.
+  //   The temporary variable is to avoid other threads accessing the intermediate value.
+  bool cap_sst_ott = true;
+  if (cap_sst_ott) {
+    if (new_sst_ott < cur_min_sst_temp) {
+      new_sst_ott = cur_min_sst_temp;
+    } else if (cur_max_sst_temp < new_sst_ott) {
+      new_sst_ott = cur_max_sst_temp;
+    }
+  }
+  _sst_ott = new_sst_ott;
+#endif
+}
+
+
+// Simple P-only, threshold-based SLA control
+void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter& jwriter) {
+  const double error_margin = 0.05;
+  //  1: Current latency is lower than the target latency. Move an SSTable to the slow device.
+  //  0: Current latency is within the error bound of the target latency. No adjustment.
+  // -1: Current latency is higher than the target latency. Move an SSTable to the fast device.
+  int sst_ott_adj = 0;
+  if (cur_value < _target_lat * (1 - error_margin)) {
+    sst_ott_adj = 1;
+  } else if (cur_value < _target_lat * (1 + error_margin)) {
+    // No adjustment
+    jwriter << "adj_type" << "within_error_margin";
+    return;
+  } else {
+    sst_ott_adj = -1;
+  }
+
+  vector<double> sst_temps;
+  {
+    lock_guard<mutex> l_(_sstMapLock);
+    for (auto i: _sstMap) {
+      SstTemp* st = i.second;
+      sst_temps.push_back(st->Temp(cur_time));
+    }
+  }
+  sort(sst_temps.begin(), sst_temps.end());
+  int s = sst_temps.size();
+  if (s == 0) {
+    // No adjustment when there is no SSTable
+    jwriter << "adj_type" << "no_sstable";
+    return;
+  }
+
+  // Find where the current _sst_ott belongs in the sorted SSTable temperatures
+  int i = 0;
+  for ( ; i < s; i ++) {
+    if (_sst_ott < sst_temps[i])
+      break;
+  }
+  // Now (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
+  if (sst_ott_adj == 1) {
+    i ++;
+  } else if (sst_ott_adj == -1) {
+    i --;
+  }
+
+  double new_sst_ott;
+  if (i <= 0) {
+    new_sst_ott = sst_temps[0] - 1.0;
+    jwriter << "adj_type" << "no_inter_sst_change_lowest";
+  } else if (s <= i) {
+    new_sst_ott = sst_temps[s-1] + 1.0;
+    jwriter << "adj_type" << "no_inter_sst_change_highest";
+  } else {
+    // Take the average when (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
+    new_sst_ott = (sst_temps[i-1] + sst_temps[i]) / 2.0;
+    if (sst_ott_adj == 1) {
+      jwriter << "adj_type" << "move_sst_to_slow";
+    } else if (sst_ott_adj == -1) {
+      jwriter << "adj_type" << "move_sst_to_fast";
+    }
+  }
+  _sst_ott = new_sst_ott;
+
+  // TODO: add some logging
 }
 
 

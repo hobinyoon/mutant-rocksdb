@@ -9,6 +9,7 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 #include "rocksdb/options.h"
+#include "util/event_logger.h"
 
 
 namespace rocksdb {
@@ -106,6 +107,7 @@ class Mutant {
   bool _initialized = false;
 
   SlaAdmin* _sla_admin = nullptr;
+  double _target_lat = -1.0;
 
   static Mutant& _GetInst();
 
@@ -138,6 +140,7 @@ class Mutant {
 
   void _SlaAdminInit(double target_lat, double p, double i, double d);
   void _SlaAdminAdjust(double lat);
+  void _AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter& jwriter);
 
   void _Shutdown();
 
