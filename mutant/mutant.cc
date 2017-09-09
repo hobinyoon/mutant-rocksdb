@@ -919,6 +919,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
     jwriter.EndObject();
     jwriter.EndObject();
     _logger->Log(jwriter);
+    return;
   }
 
   // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
