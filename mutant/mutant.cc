@@ -949,6 +949,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
     _lat_hist.pop_front();
   }
   _lat_hist.push_back(lat);
+  lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
 
   jwriter << "lat_running_avg" << lat_running_avg;
 
