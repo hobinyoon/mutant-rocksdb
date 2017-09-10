@@ -908,10 +908,6 @@ void Mutant::_SlaAdminAdjust(double lat) {
     make_adjustment = (2 <= _no_comp_flush_cnt);
   }
 
-  const size_t lat_hist_q_size = 30;
-
-  double lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
-
   // No adjustment when the latency spikes by more than 1.5x.
   //   Only when there is enough latency data in _lat_hist
   //   This is to filter out high latencies that were not filtered out by the above test.
@@ -919,7 +915,9 @@ void Mutant::_SlaAdminAdjust(double lat) {
   //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
   //       Still won't be easy to be perfect.
   if (make_adjustment) {
-    if (_lat_hist.size() == lat_hist_q_size) {
+    lock_guard<mutex> _(_lat_hist_lock);
+    if (_options.lat_hist_q_size <= _lat_hist.size()) {
+      double lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
       if (lat_running_avg * 1.5 < lat) {
         make_adjustment = false;
       }
@@ -945,26 +943,36 @@ void Mutant::_SlaAdminAdjust(double lat) {
   //double adj = _sla_admin->CalcAdj(lat, jwriter);
 
   // Use the running average
-  if (lat_hist_q_size < _lat_hist.size()) {
-    _lat_hist.pop_front();
+  double lat_running_avg = 0.0;
+  {
+    lock_guard<mutex> _(_lat_hist_lock);
+    if (_options.lat_hist_q_size <= _lat_hist.size()) {
+      _lat_hist.pop_front();
+    }
+    _lat_hist.push_back(lat);
+    lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
   }
-  _lat_hist.push_back(lat);
-  lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
-
   jwriter << "lat_running_avg" << lat_running_avg;
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
   _AdjSstOtt(lat_running_avg, cur_time, &jwriter);
 
-  jwriter << "sst_ott" << _sst_ott;
+  _LogSstStatus(cur_time, &jwriter);
 
-  // TODO: to a separate function
-  // List SSTables.
-  //   Current temperature.
-  //   The current storage device.
-  //   Where it should be based on the current sst_ott.
-  // The number of SSTables in fast and slow devices.
-  // The number of SSTables that would be in fast and slow devices based on the current sst_ott.
+  jwriter.EndObject();
+  jwriter.EndObject();
+  _logger->Log(jwriter);
+}
+
+
+// Log SSTable status:
+//   Current temperature
+//   The current storage device
+//   Where it should be based on the current sst_ott
+// The number of SSTables in fast and slow devices.
+// The number of SSTables that would be in fast and slow devices based on the current sst_ott.
+void Mutant::_LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter* jwriter) {
+  (*jwriter) << "sst_ott" << _sst_ott;
 
   int num_ssts_fast = 0;
   int num_ssts_slow = 0;
@@ -993,64 +1001,11 @@ void Mutant::_SlaAdminAdjust(double lat) {
             % sst_id % st->Level() % temp % path_id % path_id_should_be));
     }
   }
-  jwriter << "sst_status" << boost::algorithm::join(sst_status_str, " ");
-  jwriter << "num_ssts_in_fast_dev" << num_ssts_fast;
-  jwriter << "num_ssts_in_slow_dev" << num_ssts_slow;
-  jwriter << "num_ssts_should_be_in_fast_dev" << num_ssts_fast_should_be;
-  jwriter << "num_ssts_should_be_in_slow_dev" << num_ssts_slow_should_be;
-
-  jwriter.EndObject();
-  jwriter.EndObject();
-  _logger->Log(jwriter);
-
-#if 0
-  // This is not quite correct
-  double cur_max_sst_temp = 0.0;
-  double cur_min_sst_temp = 0.0;
-  bool first = true;
-  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
-  {
-    lock_guard<mutex> l_(_sstMapLock);
-    for (auto i: _sstMap) {
-      SstTemp* st = i.second;
-      if (first) {
-        cur_max_sst_temp = cur_min_sst_temp = st->Temp(cur_time);
-        first = false;
-      } else {
-        cur_max_sst_temp = max(cur_max_sst_temp, st->Temp(cur_time));
-        cur_min_sst_temp = min(cur_min_sst_temp, st->Temp(cur_time));
-      }
-    }
-  }
-
-  // TODO: update _sst_ott so that only one SSTable can be moved at a time. After moving one, wait for 2 seconds before making another adjustment.
-  bool exponential_adj = false;
-  double new_sst_ott;
-  if (exponential_adj) {
-    if (0 < adj) {
-      new_sst_ott = _sst_ott * 1.05;
-    } else {
-      new_sst_ott = _sst_ott / 1.05;
-    }
-  } else {
-    new_sst_ott = _sst_ott + adj;
-  }
-
-  // Force sst_ott to be
-  //   (a) > 0: Just because a negative value doesn't make any sense.
-  //     I dont't think it's harmful though. It means keeping all SSTables in fast device. But still feels strange.
-  //   (b) < _cur_sst_tmp_max: not to set it to far.
-  //   The temporary variable is to avoid other threads accessing the intermediate value.
-  bool cap_sst_ott = true;
-  if (cap_sst_ott) {
-    if (new_sst_ott < cur_min_sst_temp) {
-      new_sst_ott = cur_min_sst_temp;
-    } else if (cur_max_sst_temp < new_sst_ott) {
-      new_sst_ott = cur_max_sst_temp;
-    }
-  }
-  _sst_ott = new_sst_ott;
-#endif
+  (*jwriter) << "sst_status" << boost::algorithm::join(sst_status_str, " ");
+  (*jwriter) << "num_ssts_in_fast_dev" << num_ssts_fast;
+  (*jwriter) << "num_ssts_in_slow_dev" << num_ssts_slow;
+  (*jwriter) << "num_ssts_should_be_in_fast_dev" << num_ssts_fast_should_be;
+  (*jwriter) << "num_ssts_should_be_in_slow_dev" << num_ssts_slow_should_be;
 }
 
 

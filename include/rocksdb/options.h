@@ -1375,6 +1375,7 @@ struct DBOptions {
     double simulation_time_dur_sec;
 
     bool sla_admin;
+    size_t lat_hist_q_size;
 
     // Create MutantOptions with default values for all fields
     MutantOptions();

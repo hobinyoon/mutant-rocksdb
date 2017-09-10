@@ -109,6 +109,7 @@ class Mutant {
 
   SlaAdmin* _sla_admin = nullptr;
   double _target_lat = -1.0;
+  std::mutex _lat_hist_lock;
   std::deque<double> _lat_hist;
 
   std::mutex _no_comp_flush_cnt_lock;
@@ -146,6 +147,7 @@ class Mutant {
   void _SlaAdminInit(double target_lat, double p, double i, double d);
   void _SlaAdminAdjust(double lat);
   void _AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter);
+  void _LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter* jwriter);
 
   void _Shutdown();
 

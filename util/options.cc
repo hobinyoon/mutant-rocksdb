@@ -877,6 +877,7 @@ DBOptions::MutantOptions::MutantOptions()
     , simulated_time_dur_sec(0.0)
     , simulation_time_dur_sec(0.0)
     , sla_admin(false)
+    , lat_hist_q_size(30)
 {
 }
 
