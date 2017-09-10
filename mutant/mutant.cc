@@ -908,6 +908,24 @@ void Mutant::_SlaAdminAdjust(double lat) {
     make_adjustment = (2 <= _no_comp_flush_cnt);
   }
 
+  const size_t lat_hist_q_size = 30;
+
+  double lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
+
+  // No adjustment when the latency spikes by more than 1.5x.
+  //   Only when there is enough latency data in _lat_hist
+  //   This is to filter out high latencies that were not filtered out by the above test.
+  //     The inaccuracy is caused from the sporadic, client-measured adjustments.
+  //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
+  //       Still won't be easy to be perfect.
+  if (make_adjustment) {
+    if (_lat_hist.size() == lat_hist_q_size) {
+      if (lat_running_avg * 1.5 < lat) {
+        make_adjustment = false;
+      }
+    }
+  }
+
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
   jwriter << "mutant_sla_admin_adjust";
@@ -926,13 +944,12 @@ void Mutant::_SlaAdminAdjust(double lat) {
   //   E.g., when there is no error, the sst_ott can be like 10.
   //double adj = _sla_admin->CalcAdj(lat, jwriter);
 
-  // Use the running average of the last 30 values.
-  if (_lat_hist.size() > 30) {
+  // Use the running average
+  if (lat_hist_q_size < _lat_hist.size()) {
     _lat_hist.pop_front();
   }
   _lat_hist.push_back(lat);
 
-  double lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
   jwriter << "lat_running_avg" << lat_running_avg;
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
