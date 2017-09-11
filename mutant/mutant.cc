@@ -908,7 +908,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
     make_adjustment = (2 <= _no_comp_flush_cnt);
   }
 
-  // No adjustment when the latency spikes by more than 1.5x.
+  // No adjustment when the latency spikes by more than 2.0x.
   //   Only when there is enough latency data in _lat_hist
   //   This is to filter out high latencies that were not filtered out by the above test.
   //     The inaccuracy is caused from the sporadic, client-measured adjustments.
@@ -918,7 +918,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
     lock_guard<mutex> _(_lat_hist_lock);
     if (_options.lat_hist_q_size <= _lat_hist.size()) {
       double lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
-      if (lat_running_avg * 1.5 < lat) {
+      if (lat_running_avg * 2.0 < lat) {
         make_adjustment = false;
       }
     }
