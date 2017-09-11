@@ -878,6 +878,7 @@ DBOptions::MutantOptions::MutantOptions()
     , simulation_time_dur_sec(0.0)
     , sla_admin(false)
     , lat_hist_q_size(30)
+    , sst_ott_adj_ranges{-0.1, -0.025}
 {
 }
 

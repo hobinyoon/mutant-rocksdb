@@ -1376,6 +1376,7 @@ struct DBOptions {
 
     bool sla_admin;
     size_t lat_hist_q_size;
+    double sst_ott_adj_ranges[2];
 
     // Create MutantOptions with default values for all fields
     MutantOptions();

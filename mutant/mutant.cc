@@ -1011,16 +1011,20 @@ void Mutant::_LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter*
 
 // Simple P-only, threshold-based SLA control
 void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter) {
-  const double error_margin = 0.05;
-  //  1: Current latency is lower than the target latency. Move an SSTable to the slow device.
-  //  0: Current latency is within the error bound of the target latency. No adjustment.
-  // -1: Current latency is higher than the target latency. Move an SSTable to the fast device.
+  // When the running average latency is in
+  //   [0, range[0]), move an SSTable to slow device. Current latency is too low.
+  //   [range[0], range[1]), do nothing. The DB is in a steady state.
+  //   [range[1], inf), move an SSTable to fast device. Current latency is too high.
+  // sst_ott_adj
+  //    1: Current latency is lower than the target latency. Move an SSTable to the slow device.
+  //    0: Current latency is within the error bound of the target latency. No adjustment.
+  //   -1: Current latency is higher than the target latency. Move an SSTable to the fast device.
   int sst_ott_adj = 0;
-  if (cur_value < _target_lat * (1 - error_margin)) {
+  if (cur_value < _target_lat * (1 + _options.sst_ott_adj_ranges[0])) {
     sst_ott_adj = 1;
-  } else if (cur_value < _target_lat * (1 + error_margin)) {
+  } else if (cur_value < _target_lat * (1 + _options.sst_ott_adj_ranges[1])) {
     // No adjustment
-    (*jwriter) << "adj_type" << "within_error_margin";
+    (*jwriter) << "adj_type" << "no_change";
     return;
   } else {
     sst_ott_adj = -1;
@@ -1042,6 +1046,11 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
     return;
   }
 
+  // We make organizations by adjusting sst_ott little by little.
+  //
+  // Directly sorting SSTables by their temperatures and move one at the boundary may be intuitive, but won't work.
+  //   Because an SSTable temperature changes over time and some hot SSTables can be in slow dev or some cold SSTables can be in fast dev.
+
   // Find where the current _sst_ott belongs in the sorted SSTable temperatures
   int i = 0;
   for ( ; i < s; i ++) {
@@ -1058,10 +1067,10 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
   double new_sst_ott;
   if (i <= 0) {
     new_sst_ott = sst_temps[0] - 1.0;
-    (*jwriter) << "adj_type" << "no_inter_sst_change_lowest";
+    (*jwriter) << "adj_type" << "no_change_lowest";
   } else if (s <= i) {
     new_sst_ott = sst_temps[s-1] + 1.0;
-    (*jwriter) << "adj_type" << "no_inter_sst_change_highest";
+    (*jwriter) << "adj_type" << "no_change_highest";
   } else {
     // Take the average when (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
     new_sst_ott = (sst_temps[i-1] + sst_temps[i]) / 2.0;
