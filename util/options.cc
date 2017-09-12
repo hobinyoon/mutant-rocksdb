@@ -869,6 +869,7 @@ ReadOptions::ReadOptions(bool cksum, bool cache)
 
 DBOptions::MutantOptions::MutantOptions()
   : monitor_temp(false)
+    , temp_decay_factor(0.999)
     , migrate_sstables(false)
     , sst_ott(20.0)
     , organize_L0_sstables(false)

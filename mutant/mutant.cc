@@ -16,7 +16,7 @@ namespace rocksdb {
 double _sst_ott;
 
 const double TEMP_UNINITIALIZED = -1.0;
-const double TEMP_DECAY_FACTOR = 0.999;
+double TEMP_DECAY_FACTOR = 0.999;
 
 // There are in realtime when not replaying a workload in the past, and in simulated time when replaying one.
 long _temp_update_interval_sec;
@@ -243,6 +243,8 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
 
   if (! _options.monitor_temp)
     return;
+
+  TEMP_DECAY_FACTOR = _options.temp_decay_factor;
 
   _sst_ott = _options.sst_ott;
 
@@ -525,7 +527,7 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
   double temp = _SstTemperature(sst_id, cur_time);
-  if (temp == -1.0) {
+  if (temp == TEMP_UNINITIALIZED) {
     // When undefined, keep the current path_id
   } else {
     if (_sst_ott < temp) {
@@ -588,6 +590,7 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
       continue;
 
     double temp = st->Temp(cur_time);
+    // We don't move SSTables without temperature
     if (temp == TEMP_UNINITIALIZED)
       continue;
 

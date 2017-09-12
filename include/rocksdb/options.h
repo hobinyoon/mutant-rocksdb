@@ -1361,6 +1361,8 @@ struct DBOptions {
   struct MutantOptions {
     bool monitor_temp;
 
+    double temp_decay_factor;
+
     // SSTable organization
     bool migrate_sstables;
     double sst_ott;
