@@ -698,24 +698,23 @@ void Mutant::_TempUpdaterRun() {
               SstTemp* st = i.second;
 
               long c = st->GetAndResetNumReads();
-              if (c > 0) {
-                double dur_since_last_update;
-                if (prev_time.is_not_a_date_time()) {
-                  // No need to worry about the time duration and the inaccuracy.  This happens only once right after RocksDB is
-                  // initialized.
-                  dur_since_last_update = _temp_update_interval_sec;
-                } else {
-                  dur_since_last_update = (cur_time - prev_time).total_nanoseconds()
-                    / 1000000000.0 / _simulation_time_dur_over_simulated;
-                }
-                double reads_per_64MB_per_sec = double(c) / (st->Size() / (64.0*1024*1024)) / dur_since_last_update;
+              double dur_since_last_update;
+              if (prev_time.is_not_a_date_time()) {
+                // No need to worry about the time duration and the inaccuracy.  This happens only once right after RocksDB is
+                // initialized.
+                dur_since_last_update = _temp_update_interval_sec;
+              } else {
+                dur_since_last_update = (cur_time - prev_time).total_nanoseconds()
+                  / 1000000000.0 / _simulation_time_dur_over_simulated;
+              }
+              double reads_per_64MB_per_sec = double(c) / (st->Size() / (64.0*1024*1024)) / dur_since_last_update;
 
-                // Update temperature. You don't need to update st when c != 0.
+              // Update temperature. You don't need to update st when c == 0.
+              if (c > 0)
                 st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
 
-                sst_status_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
-                      % sst_id % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
-              }
+              sst_status_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
+                    % sst_id % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
             }
           }
 
