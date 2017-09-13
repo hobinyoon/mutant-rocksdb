@@ -1068,7 +1068,7 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
 
   double new_sst_ott;
   if (i <= 0) {
-    new_sst_ott = sst_temps[0] - 1.0;
+    new_sst_ott = 0.0;
     (*jwriter) << "adj_type" << "no_change_lowest";
   } else if (s <= i) {
     new_sst_ott = sst_temps[s-1] + 1.0;
