@@ -1376,9 +1376,14 @@ struct DBOptions {
     double simulated_time_dur_sec;
     double simulation_time_dur_sec;
 
-    bool sla_admin;
-    size_t lat_hist_q_size;
+    // "none": No SLA admin
+    // "latency": latency based
+    // "slow_dev_r_iops" slow device iops based
+    std::string sla_admin_type;
+    size_t sla_observed_value_hist_q_size;
     double sst_ott_adj_ranges[2];
+    std::string slow_dev;
+    double slow_dev_target_r_iops;
 
     // Create MutantOptions with default values for all fields
     MutantOptions();

@@ -1,4 +1,5 @@
 #include <atomic>
+#include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/format.hpp>
 
@@ -201,7 +202,7 @@ public:
 
     double adj = _p * error + _i * _integral + _d * derivative;
 
-    // TODO: enclose this with something like cur_pid_values
+    // Note: enclose this with something like cur_pid_values
     jwriter << "dt" << dt;
     jwriter << "p" << error;
     jwriter << "i" << _integral;
@@ -210,6 +211,80 @@ public:
 
     return adj;
   }
+};
+
+
+class DiskMon {
+private:
+	string _fn;
+	double _prev_ts = -1;
+	long _prev_read_ios = 0;
+	long _prev_write_ios = 0;
+
+public:
+	DiskMon(const string& dev) {
+		_fn = str(boost::format("/sys/block/%s/stat") % dev);
+	}
+
+  // Get read and write iops. -1 when undefined.
+	void Get(double& r, double& w) {
+		// https://www.kernel.org/doc/Documentation/block/stat.txt
+		//
+		// Name            units         description
+		// ----            -----         -----------
+		// read I/Os       requests      number of read I/Os processed
+		// read merges     requests      number of read I/Os merged with in-queue I/O
+		// read sectors    sectors       number of sectors read
+		// read ticks      milliseconds  total wait time for read requests
+		// write I/Os      requests      number of write I/Os processed
+		// write merges    requests      number of write I/Os merged with in-queue I/O
+		// write sectors   sectors       number of sectors written
+		// write ticks     milliseconds  total wait time for write requests
+		// in_flight       requests      number of I/Os currently in flight
+		// io_ticks        milliseconds  total time this block device has been active
+		// time_in_queue   milliseconds  total wait time for all requests
+		//
+		// $ cat /sys/block/xvde/stat
+		// 144487        0  2303026   233216   428849 11938402 108265496 12622636        0   464196 12855836
+		string line;
+		{
+			ifstream ifs(_fn);
+			if (! getline(ifs, line))
+				THROW("Unexpected");
+		}
+		boost::trim(line);
+		static const auto sep = boost::is_any_of(" ");
+		vector<string> t;
+		boost::split(t, line, sep, boost::algorithm::token_compress_on);
+		if (t.size() != 11)
+      THROW(boost::format("Unexpected. %d [%s]\n") % t.size() % line);
+		long read_ios = atol(t[0].c_str());
+		long write_ios = atol(t[4].c_str());
+
+		timeval tv;
+		gettimeofday(&tv, 0);
+		double ts_now = tv.tv_sec + tv.tv_usec * 0.000001;
+
+		if (_prev_ts == -1) {
+			r = -1;
+			w = -1;
+		} else {
+			long r_delta = read_ios - _prev_read_ios;
+			long w_delta = write_ios - _prev_write_ios;
+			double ts_delta = ts_now - _prev_ts;
+			if (ts_delta == 0.0) {
+				r = -1;
+				w = -1;
+			} else {
+				r = r_delta / ts_delta;
+				w = w_delta / ts_delta;
+			}
+		}
+
+		_prev_ts = ts_now;
+		_prev_read_ios = read_ios;
+		_prev_write_ios = write_ios;
+	}
 };
 
 
@@ -881,6 +956,7 @@ void Mutant::_SlaAdminInit(double target_lat, double p, double i, double d) {
   if (_sla_admin == nullptr) {
     _sla_admin = new SlaAdmin(target_lat, p, i, d, _logger);
     _target_lat = target_lat;
+    _disk_mon = new DiskMon(_options.slow_dev);
   }
 }
 
@@ -907,34 +983,49 @@ void Mutant::_SlaAdminAdjust(double lat) {
     make_adjustment = (2 <= _no_comp_flush_cnt);
   }
 
-  // No adjustment when the latency spikes by more than 2.0x.
-  //   Only when there is enough latency data in _lat_hist
-  //   This is to filter out high latencies that were not filtered out by the above test.
-  //     The inaccuracy is caused from the sporadic, client-measured adjustments.
-  //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
-  //       Still won't be easy to be perfect.
   if (make_adjustment) {
-    lock_guard<mutex> _(_lat_hist_lock);
-    if (_options.lat_hist_q_size <= _lat_hist.size()) {
-      double lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
-      if (lat_running_avg * 2.0 < lat) {
+    if (_options.sla_admin_type == "latency") {
+      // No adjustment when the latency spikes by more than 2.0x.
+      //   Only when there is enough latency data in _lat_hist
+      //   This is to filter out high latencies that were not filtered out by the above test.
+      //     The inaccuracy is caused from the sporadic, client-measured adjustments.
+      //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
+      //       Still won't be easy to be perfect.
+      lock_guard<mutex> _(_lat_hist_lock);
+      if (_lat_hist.size() < _options.sla_observed_value_hist_q_size) {
+        make_adjustment = false;
+      } else {
+        double running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
+        if (running_avg * 3.0 < lat) {
+          make_adjustment = false;
+        }
+      }
+    } else if (_options.sla_admin_type == "slow_dev_r_iops") {
+      lock_guard<mutex> _(_slow_dev_r_iops_hist_lock);
+      if (_slow_dev_r_iops_hist.size() < _options.sla_observed_value_hist_q_size) {
         make_adjustment = false;
       }
     }
+    // We don't do the same with slow_dev_r_iops, which can make a suddern increase or decrease.
   }
 
+  // Log current latency even when sla_admin is not used or no adjustment is needed
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
   jwriter << "mutant_sla_admin_adjust";
   jwriter.StartObject();
   jwriter << "cur_lat" << lat;
   jwriter << "make_adjustment" << make_adjustment;
+  double slow_dev_r_iops;
+  double slow_dev_w_iops;
+  _disk_mon->Get(slow_dev_r_iops, slow_dev_w_iops);
+  jwriter << "slow_dev_r_iops" << slow_dev_r_iops;
+  jwriter << "slow_dev_w_iops" << slow_dev_w_iops;
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
   _LogSstStatus(cur_time, &jwriter);
 
-  // Log current latency even when sla_admin is not active or no adjustment is needed
-  if ( !_options.sla_admin || !make_adjustment ) {
+  if (_options.sla_admin_type == "none" || !make_adjustment ) {
     jwriter.EndObject();
     jwriter.EndObject();
     _logger->Log(jwriter);
@@ -945,19 +1036,16 @@ void Mutant::_SlaAdminAdjust(double lat) {
   //   E.g., when there is no error, the sst_ott can be like 10.
   //double adj = _sla_admin->CalcAdj(lat, jwriter);
 
-  // Use the running average
-  double lat_running_avg = 0.0;
-  {
-    lock_guard<mutex> _(_lat_hist_lock);
-    if (_options.lat_hist_q_size <= _lat_hist.size()) {
-      _lat_hist.pop_front();
-    }
-    _lat_hist.push_back(lat);
-    lat_running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
+  double cur_value = -1;
+  if (_options.sla_admin_type == "latency") {
+    cur_value = lat;
+  } else if (_options.sla_admin_type == "slow_dev_r_iops") {
+    cur_value = slow_dev_r_iops;
+  } else {
+    THROW("Unexpected");
   }
-  jwriter << "lat_running_avg" << lat_running_avg;
 
-  _AdjSstOtt(lat_running_avg, cur_time, &jwriter);
+  _AdjSstOtt(cur_value, cur_time, &jwriter);
 
   jwriter.EndObject();
   jwriter.EndObject();
@@ -1011,6 +1099,32 @@ void Mutant::_LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter*
 
 // Simple P-only, threshold-based SLA control
 void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter) {
+  double running_avg = -1;
+  double target_value = -1;
+
+  if (_options.sla_admin_type == "latency") {
+    {
+      lock_guard<mutex> _(_lat_hist_lock);
+      if (_options.sla_observed_value_hist_q_size <= _lat_hist.size()) {
+        _lat_hist.pop_front();
+      }
+      _lat_hist.push_back(cur_value);
+      running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
+    }
+    target_value = _target_lat;
+  } else if (_options.sla_admin_type == "slow_dev_r_iops") {
+    {
+      lock_guard<mutex> _(_slow_dev_r_iops_hist_lock);
+      if (_options.sla_observed_value_hist_q_size <= _slow_dev_r_iops_hist.size()) {
+        _slow_dev_r_iops_hist.pop_front();
+      }
+      _slow_dev_r_iops_hist.push_back(cur_value);
+      running_avg = std::accumulate(_slow_dev_r_iops_hist.begin(), _slow_dev_r_iops_hist.end(), 0.0) / _slow_dev_r_iops_hist.size();
+    }
+    target_value = _options.slow_dev_target_r_iops;
+  }
+  (*jwriter) << "running_avg" << running_avg;
+
   // When the running average latency is in
   //   [0, range[0]), move an SSTable to slow device. Current latency is too low.
   //   [range[0], range[1]), do nothing. The DB is in a steady state.
@@ -1019,10 +1133,12 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
   //    1: Current latency is lower than the target latency. Move an SSTable to the slow device.
   //    0: Current latency is within the error bound of the target latency. No adjustment.
   //   -1: Current latency is higher than the target latency. Move an SSTable to the fast device.
+  //
+  // Latency can be generalied to a target metric such as latency, cost, or slow_dev_r_iops.
   int sst_ott_adj = 0;
-  if (cur_value < _target_lat * (1 + _options.sst_ott_adj_ranges[0])) {
+  if (running_avg < target_value * (1 + _options.sst_ott_adj_ranges[0])) {
     sst_ott_adj = 1;
-  } else if (cur_value < _target_lat * (1 + _options.sst_ott_adj_ranges[1])) {
+  } else if (running_avg < target_value * (1 + _options.sst_ott_adj_ranges[1])) {
     // No adjustment
     (*jwriter) << "adj_type" << "no_change";
     return;
@@ -1091,8 +1207,15 @@ void Mutant::_Shutdown() {
   static mutex m;
   lock_guard<mutex> _(m);
 
-  if (_sla_admin)
+  if (_sla_admin) {
     delete _sla_admin;
+    _sla_admin = nullptr;
+  }
+
+  if (_disk_mon) {
+    delete _disk_mon;
+    _disk_mon = nullptr;
+  }
 
   _smt_stop_requested = true;
   _SstMigrationTriggererWakeup();

@@ -877,9 +877,10 @@ DBOptions::MutantOptions::MutantOptions()
     , replaying(false)
     , simulated_time_dur_sec(0.0)
     , simulation_time_dur_sec(0.0)
-    , sla_admin(false)
-    , lat_hist_q_size(30)
+    , sla_admin_type("none")
+    , sla_observed_value_hist_q_size(30)
     , sst_ott_adj_ranges{-0.1, -0.025}
+    , slow_dev_target_r_iops(250)
 {
 }
 

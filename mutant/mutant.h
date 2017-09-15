@@ -26,6 +26,7 @@ class TableReader;
 
 class SstTemp;
 class SlaAdmin;
+class DiskMon;
 
 // Mutant design
 // -------------
@@ -58,6 +59,7 @@ class Mutant {
   DBImpl* _db = nullptr;
   EventLogger* _logger = nullptr;
   ColumnFamilyData* _cfd = nullptr;
+  DiskMon* _disk_mon = nullptr;
 
   // This is updated very frequently by threads whenever a SSTable or a
   // MemTable is read, thus we don't used an expensive atomic operation here.
@@ -111,6 +113,8 @@ class Mutant {
   double _target_lat = -1.0;
   std::mutex _lat_hist_lock;
   std::deque<double> _lat_hist;
+  std::mutex _slow_dev_r_iops_hist_lock;
+  std::deque<double> _slow_dev_r_iops_hist;
 
   std::mutex _no_comp_flush_cnt_lock;
   int _no_comp_flush_cnt = 0;
