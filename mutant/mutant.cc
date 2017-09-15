@@ -889,9 +889,6 @@ void Mutant::_SlaAdminAdjust(double lat) {
   if (_sla_admin == nullptr)
     THROW("Unexpected");
 
-  if (! _options.sla_admin)
-    return;
-
   // No adjustment while either a flush or a compaction is running.
   bool make_adjustment = false;
   {
@@ -933,7 +930,8 @@ void Mutant::_SlaAdminAdjust(double lat) {
   jwriter << "cur_lat" << lat;
   jwriter << "make_adjustment" << make_adjustment;
 
-  if (! make_adjustment) {
+  // Log current latency even when sla_admin is not active or no adjustment is needed
+  if ( !_options.sla_admin || !make_adjustment ) {
     jwriter.EndObject();
     jwriter.EndObject();
     _logger->Log(jwriter);
