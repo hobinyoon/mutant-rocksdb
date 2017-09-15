@@ -930,6 +930,9 @@ void Mutant::_SlaAdminAdjust(double lat) {
   jwriter << "cur_lat" << lat;
   jwriter << "make_adjustment" << make_adjustment;
 
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+  _LogSstStatus(cur_time, &jwriter);
+
   // Log current latency even when sla_admin is not active or no adjustment is needed
   if ( !_options.sla_admin || !make_adjustment ) {
     jwriter.EndObject();
@@ -954,10 +957,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
   }
   jwriter << "lat_running_avg" << lat_running_avg;
 
-  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
   _AdjSstOtt(lat_running_avg, cur_time, &jwriter);
-
-  _LogSstStatus(cur_time, &jwriter);
 
   jwriter.EndObject();
   jwriter.EndObject();
