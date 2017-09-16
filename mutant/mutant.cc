@@ -992,18 +992,11 @@ void Mutant::_SlaAdminAdjust(double lat) {
       //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
       //       Still won't be easy to be perfect.
       lock_guard<mutex> _(_lat_hist_lock);
-      if (_lat_hist.size() < _options.sla_observed_value_hist_q_size) {
-        make_adjustment = false;
-      } else {
+      if (_options.sla_observed_value_hist_q_size <= _lat_hist.size()) {
         double running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
         if (running_avg * 3.0 < lat) {
           make_adjustment = false;
         }
-      }
-    } else if (_options.sla_admin_type == "slow_dev_r_iops") {
-      lock_guard<mutex> _(_slow_dev_r_iops_hist_lock);
-      if (_slow_dev_r_iops_hist.size() < _options.sla_observed_value_hist_q_size) {
-        make_adjustment = false;
       }
     }
     // We don't do the same with slow_dev_r_iops, which can make a suddern increase or decrease.
@@ -1015,7 +1008,6 @@ void Mutant::_SlaAdminAdjust(double lat) {
   jwriter << "mutant_sla_admin_adjust";
   jwriter.StartObject();
   jwriter << "cur_lat" << lat;
-  jwriter << "make_adjustment" << make_adjustment;
   double slow_dev_r_iops;
   double slow_dev_w_iops;
   _disk_mon->Get(slow_dev_r_iops, slow_dev_w_iops);
@@ -1026,6 +1018,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
   _LogSstStatus(cur_time, &jwriter);
 
   if (_options.sla_admin_type == "none" || !make_adjustment ) {
+    jwriter << "make_adjustment" << make_adjustment;
     jwriter.EndObject();
     jwriter.EndObject();
     _logger->Log(jwriter);
@@ -1101,6 +1094,7 @@ void Mutant::_LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter*
 void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter) {
   double running_avg = -1;
   double target_value = -1;
+  bool make_adjustment = false;
 
   if (_options.sla_admin_type == "latency") {
     {
@@ -1109,6 +1103,7 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
         _lat_hist.pop_front();
       }
       _lat_hist.push_back(cur_value);
+      make_adjustment = (_options.sla_observed_value_hist_q_size <= _lat_hist.size());
       running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
     }
     target_value = _target_lat;
@@ -1119,10 +1114,16 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
         _slow_dev_r_iops_hist.pop_front();
       }
       _slow_dev_r_iops_hist.push_back(cur_value);
+      make_adjustment = (_options.sla_observed_value_hist_q_size <= _slow_dev_r_iops_hist.size());
       running_avg = std::accumulate(_slow_dev_r_iops_hist.begin(), _slow_dev_r_iops_hist.end(), 0.0) / _slow_dev_r_iops_hist.size();
     }
     target_value = _options.slow_dev_target_r_iops;
   }
+
+  (*jwriter) << "make_adjustment" << make_adjustment;
+  if (!make_adjustment)
+    return;
+
   (*jwriter) << "running_avg" << running_avg;
 
   // When the running average latency is in
