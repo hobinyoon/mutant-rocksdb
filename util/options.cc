@@ -492,12 +492,24 @@ void DBOptions::Dump(Logger* log) const {
 void DBOptions::DumpMutantOptions(Logger* log) const {
   Header(log, "MutantOptions");
   Header(log, "  monitor_temp: %d", mutant_options.monitor_temp);
+  Header(log, "  temp_decay_factor: %f", mutant_options.temp_decay_factor);
+
   Header(log, "  migrate_sstables: %d", mutant_options.migrate_sstables);
   Header(log, "  sst_ott: %f", mutant_options.sst_ott);
+  Header(log, "  organize_L0_sstables: %d", mutant_options.organize_L0_sstables);
+
   Header(log, "  cache_filter_index_at_all_levels: %d", mutant_options.cache_filter_index_at_all_levels);
+
   Header(log, "  replaying: %d", mutant_options.replaying);
   Header(log, "  simulation_time_dur_sec: %f", mutant_options.simulation_time_dur_sec);
   Header(log, "  simulated_time_dur_sec: %f", mutant_options.simulated_time_dur_sec);
+
+  Header(log, "  sla_admin_type: %s", mutant_options.sla_admin_type);
+  Header(log, "  sla_observed_value_hist_q_size: %d", mutant_options.sla_observed_value_hist_q_size);
+  Header(log, "  sst_ott_adj_ranges: %d %d",
+      mutant_options.sst_ott_adj_ranges[0], mutant_options.sst_ott_adj_ranges[1]);
+  Header(log, "  slow_dev: %s", mutant_options.slow_dev);
+  Header(log, "  slow_dev_target_r_iops: %f", mutant_options.slow_dev_target_r_iops);
 }
 
 
