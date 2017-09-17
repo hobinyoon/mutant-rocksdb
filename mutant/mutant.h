@@ -115,6 +115,7 @@ class Mutant {
   std::deque<double> _lat_hist;
   std::mutex _slow_dev_r_iops_hist_lock;
   std::deque<double> _slow_dev_r_iops_hist;
+  boost::posix_time::ptime _sst_ott_change_advised_time;
 
   std::mutex _no_comp_flush_cnt_lock;
   int _no_comp_flush_cnt = 0;

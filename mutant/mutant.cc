@@ -983,9 +983,13 @@ void Mutant::_SlaAdminAdjust(double lat) {
     make_adjustment = (2 <= _no_comp_flush_cnt);
   }
 
+  double slow_dev_r_iops;
+  double slow_dev_w_iops;
+  _disk_mon->Get(slow_dev_r_iops, slow_dev_w_iops);
+
   if (make_adjustment) {
     if (_options.sla_admin_type == "latency") {
-      // No adjustment when the latency spikes by more than 2.0x.
+      // No adjustment when the latency spikes by more than 3.0x.
       //   Only when there is enough latency data in _lat_hist
       //   This is to filter out high latencies that were not filtered out by the above test.
       //     The inaccuracy is caused from the sporadic, client-measured adjustments.
@@ -998,8 +1002,12 @@ void Mutant::_SlaAdminAdjust(double lat) {
           make_adjustment = false;
         }
       }
+    } else if (_options.sla_admin_type == "slow_dev_r_iops") {
+      // Filter out transient high read IOs probably caused by SSTable compactions / migrations.
+      //   3TB st1 seems to saturate around 550 iops. Anything above that indicates a transient boost.
+      if (600 < slow_dev_r_iops)
+        make_adjustment = false;
     }
-    // We don't do the same with slow_dev_r_iops, which can make a suddern increase or decrease.
   }
 
   // Log current latency even when sla_admin is not used or no adjustment is needed
@@ -1008,14 +1016,20 @@ void Mutant::_SlaAdminAdjust(double lat) {
   jwriter << "mutant_sla_admin_adjust";
   jwriter.StartObject();
   jwriter << "cur_lat" << lat;
-  double slow_dev_r_iops;
-  double slow_dev_w_iops;
-  _disk_mon->Get(slow_dev_r_iops, slow_dev_w_iops);
   jwriter << "slow_dev_r_iops" << slow_dev_r_iops;
   jwriter << "slow_dev_w_iops" << slow_dev_w_iops;
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
   _LogSstStatus(cur_time, &jwriter);
+
+  if (make_adjustment) {
+    if (!_sst_ott_change_advised_time.is_not_a_date_time()) {
+      if ((cur_time - _sst_ott_change_advised_time).total_milliseconds() < 3000) {
+        jwriter << "adj_type" << "cool_down";
+        make_adjustment = false;
+      }
+    }
+  }
 
   if (_options.sla_admin_type == "none" || !make_adjustment ) {
     jwriter << "make_adjustment" << make_adjustment;
@@ -1189,13 +1203,15 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
     new_sst_ott = sst_temps[s-1] + 1.0;
     (*jwriter) << "adj_type" << "no_change_highest";
   } else {
-    // Take the average when (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
-    new_sst_ott = (sst_temps[i-1] + sst_temps[i]) / 2.0;
     if (sst_ott_adj == 1) {
       (*jwriter) << "adj_type" << "move_sst_to_slow";
     } else if (sst_ott_adj == -1) {
       (*jwriter) << "adj_type" << "move_sst_to_fast";
     }
+    // Take the average when (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
+    new_sst_ott = (sst_temps[i-1] + sst_temps[i]) / 2.0;
+
+    _sst_ott_change_advised_time = cur_time;
   }
   _sst_ott = new_sst_ott;
 }
