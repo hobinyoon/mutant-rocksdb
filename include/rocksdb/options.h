@@ -1384,6 +1384,7 @@ struct DBOptions {
     double sst_ott_adj_ranges[2];
     std::string slow_dev;
     double slow_dev_target_r_iops;
+    long sst_ott_adj_cooldown_ms;
 
     // Create MutantOptions with default values for all fields
     MutantOptions();

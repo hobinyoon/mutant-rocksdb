@@ -1024,7 +1024,7 @@ void Mutant::_SlaAdminAdjust(double lat) {
 
   if (make_adjustment) {
     if (!_sst_ott_change_advised_time.is_not_a_date_time()) {
-      if ((cur_time - _sst_ott_change_advised_time).total_milliseconds() < 3000) {
+      if ((cur_time - _sst_ott_change_advised_time).total_milliseconds() < _options.sst_ott_adj_cooldown_ms) {
         jwriter << "adj_type" << "cool_down";
         make_adjustment = false;
       }
