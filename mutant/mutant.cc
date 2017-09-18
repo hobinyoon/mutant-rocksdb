@@ -1151,9 +1151,9 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
   //
   // Latency can be generalied to a target metric such as latency, cost, or slow_dev_r_iops.
   int sst_ott_adj = 0;
-  if (running_avg < target_value * (1 + _options.sst_ott_adj_ranges[0])) {
+  if (running_avg < target_value * (1 + _options.error_adj_ranges[0])) {
     sst_ott_adj = 1;
-  } else if (running_avg < target_value * (1 + _options.sst_ott_adj_ranges[1])) {
+  } else if (running_avg < target_value * (1 + _options.error_adj_ranges[1])) {
     // No adjustment
     (*jwriter) << "adj_type" << "no_change";
     return;

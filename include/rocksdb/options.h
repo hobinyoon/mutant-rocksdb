@@ -1381,7 +1381,7 @@ struct DBOptions {
     // "slow_dev_r_iops" slow device iops based
     std::string sla_admin_type;
     size_t sla_observed_value_hist_q_size;
-    double sst_ott_adj_ranges[2];
+    double error_adj_ranges[2];
     std::string slow_dev;
     double slow_dev_target_r_iops;
     long sst_ott_adj_cooldown_ms;

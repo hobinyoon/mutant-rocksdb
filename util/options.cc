@@ -506,8 +506,8 @@ void DBOptions::DumpMutantOptions(Logger* log) const {
 
   Header(log, "  sla_admin_type: %s", mutant_options.sla_admin_type.c_str());
   Header(log, "  sla_observed_value_hist_q_size: %d", mutant_options.sla_observed_value_hist_q_size);
-  Header(log, "  sst_ott_adj_ranges: %d %d",
-      mutant_options.sst_ott_adj_ranges[0], mutant_options.sst_ott_adj_ranges[1]);
+  Header(log, "  error_adj_ranges: %f %f",
+      mutant_options.error_adj_ranges[0], mutant_options.error_adj_ranges[1]);
   Header(log, "  slow_dev: %s", mutant_options.slow_dev.c_str());
   Header(log, "  slow_dev_target_r_iops: %f", mutant_options.slow_dev_target_r_iops);
   Header(log, "  sst_ott_adj_cooldown_ms: %d", mutant_options.sst_ott_adj_cooldown_ms);
@@ -892,7 +892,7 @@ DBOptions::MutantOptions::MutantOptions()
     , simulation_time_dur_sec(0.0)
     , sla_admin_type("none")
     , sla_observed_value_hist_q_size(30)
-    , sst_ott_adj_ranges{-0.1, -0.025}
+    , error_adj_ranges{-0.1, -0.025}
     , slow_dev_target_r_iops(250)
     , sst_ott_adj_cooldown_ms(3000)
 {
