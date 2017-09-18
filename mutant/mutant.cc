@@ -171,17 +171,11 @@ public:
 
   // Calc an adjustment to the controlling value.
   double CalcAdj(double cur_value, JSONWriter& jwriter) {
-    // Prevent suddern peaks lowering sst_ott too fast
-    if (_target_value * 2.0 < cur_value)
-      cur_value = _target_value * 2.0;
+    // Prevent suddern peaks lowering sst_ott too fast. We don't need this now.
+    //if (_target_value * 2.0 < cur_value)
+    //  cur_value = _target_value * 2.0;
 
-    double error;
-    // When cur_value is a bit less than _target_value, take it as stabilized.
-    if ( (_target_value * 0.95 < cur_value) && (cur_value < _target_value * 1.05) ) {
-      error = 0.0;
-    } else {
-      error = _target_value - cur_value;
-    }
+    double error = _target_value - cur_value;
 
     boost::posix_time::ptime ts = boost::posix_time::microsec_clock::local_time();
 
@@ -209,7 +203,11 @@ public:
     jwriter << "d" << derivative;
     jwriter << "adj" << adj;
 
-    return adj;
+    // Relative adjustment value to _target_value
+    double adj1 = adj / _target_value;
+    jwriter << "adj1" << adj1;
+
+    return adj1;
   }
 };
 
@@ -955,7 +953,6 @@ void Mutant::_SlaAdminInit(double target_lat, double p, double i, double d) {
   lock_guard<mutex> _(m);
   if (_sla_admin == nullptr) {
     _sla_admin = new SlaAdmin(target_lat, p, i, d, _logger);
-    _target_lat = target_lat;
     _disk_mon = new DiskMon(_options.slow_dev);
   }
 }
@@ -1104,12 +1101,9 @@ void Mutant::_LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter*
 }
 
 
-// Simple P-only, threshold-based SLA control
 void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter) {
-  double running_avg = -1;
-  double target_value = -1;
+  // When there isn't enough data, make no adjustment.
   bool make_adjustment = false;
-
   if (_options.sla_admin_type == "latency") {
     {
       lock_guard<mutex> _(_lat_hist_lock);
@@ -1118,9 +1112,7 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
       }
       _lat_hist.push_back(cur_value);
       make_adjustment = (_options.sla_observed_value_hist_q_size <= _lat_hist.size());
-      running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
     }
-    target_value = _target_lat;
   } else if (_options.sla_admin_type == "slow_dev_r_iops") {
     {
       lock_guard<mutex> _(_slow_dev_r_iops_hist_lock);
@@ -1129,36 +1121,27 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
       }
       _slow_dev_r_iops_hist.push_back(cur_value);
       make_adjustment = (_options.sla_observed_value_hist_q_size <= _slow_dev_r_iops_hist.size());
-      running_avg = std::accumulate(_slow_dev_r_iops_hist.begin(), _slow_dev_r_iops_hist.end(), 0.0) / _slow_dev_r_iops_hist.size();
     }
-    target_value = _options.slow_dev_target_r_iops;
   }
 
   (*jwriter) << "make_adjustment" << make_adjustment;
   if (!make_adjustment)
     return;
 
-  (*jwriter) << "running_avg" << running_avg;
+  double pid_adj = _sla_admin->CalcAdj(cur_value, *jwriter);
+  // When 0 < pid_adj, target_value is bigger. should increase slow dev iops. should raise sst_ott.
 
-  // When the running average latency is in
-  //   [0, range[0]), move an SSTable to slow device. Current latency is too low.
-  //   [range[0], range[1]), do nothing. The DB is in a steady state.
-  //   [range[1], inf), move an SSTable to fast device. Current latency is too high.
-  // sst_ott_adj
-  //    1: Current latency is lower than the target latency. Move an SSTable to the slow device.
-  //    0: Current latency is within the error bound of the target latency. No adjustment.
-  //   -1: Current latency is higher than the target latency. Move an SSTable to the fast device.
-  //
-  // Latency can be generalied to a target metric such as latency, cost, or slow_dev_r_iops.
   int sst_ott_adj = 0;
-  if (running_avg < target_value * (1 + _options.error_adj_ranges[0])) {
-    sst_ott_adj = 1;
-  } else if (running_avg < target_value * (1 + _options.error_adj_ranges[1])) {
-    // No adjustment
+  if (pid_adj < _options.error_adj_ranges[0]) {
+    // target_value < observed_value. should decrease slow dev iops. should lower sst_ott.
+    sst_ott_adj = -1;
+  } else if (pid_adj < _options.error_adj_ranges[1]) {
+    // pid_adj is within the error margin. make no adjustment.
     (*jwriter) << "adj_type" << "no_change";
     return;
   } else {
-    sst_ott_adj = -1;
+    // observed_value < target_value. should increase slow dev iops. should raise sst_ott.
+    sst_ott_adj = 1;
   }
 
   vector<double> sst_temps;
