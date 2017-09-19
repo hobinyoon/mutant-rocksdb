@@ -171,6 +171,8 @@ public:
   virtual ~SlaAdmin() { }
 
   // Calc an adjustment to the controlling value.
+  //   The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
+  //     E.g., when there is no error, the sst_ott can be like 10.
   double CalcAdj(double cur_value, JSONWriter& jwriter) {
     // Prevent suddern peaks lowering sst_ott too fast. We don't need this now.
     //if (_target_value * 2.0 < cur_value)
@@ -970,21 +972,26 @@ void Mutant::_SlaAdminAdjust(double lat) {
   double slow_dev_w_iops;
   _disk_mon->Get(slow_dev_r_iops, slow_dev_w_iops);
 
-  if (_options.sla_admin_type == "latency") {
-    // No adjustment when the latency spikes by more than 3.0x.
-    //   Only when there is enough latency data in _lat_hist
-    //   This is to filter out high latencies that were not filtered out by the above test.
-    //     The inaccuracy is caused from the sporadic, client-measured adjustments.
-    //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
-    //       Still won't be easy to be perfect.
-    lock_guard<mutex> _(_lat_hist_lock);
-    if (_options.sla_observed_value_hist_q_size <= _lat_hist.size()) {
-      double running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
-      if (running_avg * 3.0 < lat) {
-        make_adjustment = false;
+  // TODO: hope we don't need this thanks to the PID controller.
+  if (false) {
+    if (_options.sla_admin_type == "latency") {
+      // No adjustment when the latency spikes by more than 3.0x.
+      //   Only when there is enough latency data in _lat_hist
+      //   This is to filter out high latencies that were not filtered out by the above test.
+      //     The inaccuracy is caused from the sporadic, client-measured adjustments.
+      //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
+      //       Still won't be easy to be perfect.
+      lock_guard<mutex> _(_lat_hist_lock);
+      if (_options.sla_observed_value_hist_q_size <= _lat_hist.size()) {
+        double running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
+        if (running_avg * 3.0 < lat) {
+          make_adjustment = false;
+        }
       }
     }
-  } else if (_options.sla_admin_type == "slow_dev_r_iops") {
+  }
+
+  if (_options.sla_admin_type == "slow_dev_r_iops") {
     // Filter out transient high read IOs probably caused by SSTable compactions / migrations.
     //   3TB st1 seems to saturate around 550 iops. Anything above that indicates a transient boost.
     if (600 < slow_dev_r_iops)
@@ -1021,10 +1028,6 @@ void Mutant::_SlaAdminAdjust(double lat) {
     _logger->Log(jwriter);
     return;
   }
-
-  // The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
-  //   E.g., when there is no error, the sst_ott can be like 10.
-  //double adj = _sla_admin->CalcAdj(lat, jwriter);
 
   double cur_value = -1;
   if (_options.sla_admin_type == "latency") {
