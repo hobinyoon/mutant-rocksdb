@@ -510,6 +510,7 @@ void DBOptions::DumpMutantOptions(Logger* log) const {
       mutant_options.error_adj_ranges[0], mutant_options.error_adj_ranges[1]);
   Header(log, "  slow_dev: %s", mutant_options.slow_dev.c_str());
   Header(log, "  sst_ott_adj_cooldown_ms: %d", mutant_options.sst_ott_adj_cooldown_ms);
+  Header(log, "  pid_i_exp_decay_factor: %f", mutant_options.pid_i_exp_decay_factor);
 }
 
 
@@ -893,6 +894,7 @@ DBOptions::MutantOptions::MutantOptions()
     , sla_observed_value_hist_q_size(30)
     , error_adj_ranges{-0.1, -0.025}
     , sst_ott_adj_cooldown_ms(3000)
+    , pid_i_exp_decay_factor(0.9)
 {
 }
 

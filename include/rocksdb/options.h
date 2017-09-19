@@ -1384,6 +1384,8 @@ struct DBOptions {
     double error_adj_ranges[2];
     std::string slow_dev;
     long sst_ott_adj_cooldown_ms;
+    // Exponential decay of I per sec
+    double pid_i_exp_decay_factor;
 
     // Create MutantOptions with default values for all fields
     MutantOptions();

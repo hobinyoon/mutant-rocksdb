@@ -3166,6 +3166,7 @@ void DBImpl::BackgroundCallFlush() {
   {
     InstrumentedMutexLock l(&mutex_);
     num_running_flushes_++;
+    Mutant::SetNumRunningFlushes(num_running_flushes_);
 
     auto pending_outputs_inserted_elem =
         CaptureCurrentFileNumberInPendingOutputs();
@@ -3213,6 +3214,7 @@ void DBImpl::BackgroundCallFlush() {
 
     assert(num_running_flushes_ > 0);
     num_running_flushes_--;
+    Mutant::SetNumRunningFlushes(num_running_flushes_);
     bg_flush_scheduled_--;
     // See if there's more work to be done
     MaybeScheduleFlushOrCompaction();
@@ -3234,6 +3236,7 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
   {
     InstrumentedMutexLock l(&mutex_);
     num_running_compactions_++;
+    Mutant::SetNumRunningCompactions(num_running_compactions_);
 
     auto pending_outputs_inserted_elem =
         CaptureCurrentFileNumberInPendingOutputs();
@@ -3286,6 +3289,7 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
 
     assert(num_running_compactions_ > 0);
     num_running_compactions_--;
+    Mutant::SetNumRunningCompactions(num_running_compactions_);
     bg_compaction_scheduled_--;
 
     versions_->GetColumnFamilySet()->FreeDeadColumnFamilies();

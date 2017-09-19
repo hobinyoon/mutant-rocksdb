@@ -142,11 +142,12 @@ class SlaAdmin {
   boost::posix_time::ptime _prev_ts;
   bool _prev_ts_defined = false;
 
+  const DBOptions::MutantOptions& mu_options;
   EventLogger* _logger;
 
 public:
-  SlaAdmin(double target_value, double p, double i, double d, EventLogger* logger)
-    : _target_value(target_value), _p(p), _i(i), _d(d)
+  SlaAdmin(double target_value, double p, double i, double d, const DBOptions::MutantOptions& options_, EventLogger* logger)
+    : _target_value(target_value), _p(p), _i(i), _d(d), mu_options(options_)
   {
     if (logger == nullptr)
       THROW("Unexpected");
@@ -184,6 +185,8 @@ public:
     double dt = 0.0;
     if (_prev_ts_defined) {
       dt = (ts - _prev_ts).total_milliseconds() / 1000.0;
+      // Apply an exponential decay to I
+      _integral *= pow(mu_options.pid_i_exp_decay_factor, dt);
       _integral += (error * dt);
       if (dt != 0.0) {
         derivative = (error - _prev_error) / dt;
@@ -952,7 +955,7 @@ void Mutant::_SlaAdminInit(double target_lat, double p, double i, double d) {
   static mutex m;
   lock_guard<mutex> _(m);
   if (_sla_admin == nullptr) {
-    _sla_admin = new SlaAdmin(target_lat, p, i, d, _logger);
+    _sla_admin = new SlaAdmin(target_lat, p, i, d, _options, _logger);
     _disk_mon = new DiskMon(_options.slow_dev);
   }
 }
@@ -962,49 +965,30 @@ void Mutant::_SlaAdminAdjust(double lat) {
   if (_sla_admin == nullptr)
     THROW("Unexpected");
 
-  // No adjustment while either a flush or a compaction is running.
-  bool make_adjustment = false;
-  {
-    uint64_t num_running_compactions = 0;
-    uint64_t num_running_flushes = 0;
-    _db->GetIntProperty(DB::Properties::kNumRunningCompactions, &num_running_compactions);
-    _db->GetIntProperty(DB::Properties::kNumRunningFlushes, &num_running_flushes);
-
-    lock_guard<mutex> _(_no_comp_flush_cnt_lock);
-    if (num_running_compactions + num_running_flushes == 0) {
-      _no_comp_flush_cnt ++;
-    } else {
-      _no_comp_flush_cnt = 0;
-    }
-
-    make_adjustment = (2 <= _no_comp_flush_cnt);
-  }
-
+  bool make_adjustment = true;
   double slow_dev_r_iops;
   double slow_dev_w_iops;
   _disk_mon->Get(slow_dev_r_iops, slow_dev_w_iops);
 
-  if (make_adjustment) {
-    if (_options.sla_admin_type == "latency") {
-      // No adjustment when the latency spikes by more than 3.0x.
-      //   Only when there is enough latency data in _lat_hist
-      //   This is to filter out high latencies that were not filtered out by the above test.
-      //     The inaccuracy is caused from the sporadic, client-measured adjustments.
-      //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
-      //       Still won't be easy to be perfect.
-      lock_guard<mutex> _(_lat_hist_lock);
-      if (_options.sla_observed_value_hist_q_size <= _lat_hist.size()) {
-        double running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
-        if (running_avg * 3.0 < lat) {
-          make_adjustment = false;
-        }
-      }
-    } else if (_options.sla_admin_type == "slow_dev_r_iops") {
-      // Filter out transient high read IOs probably caused by SSTable compactions / migrations.
-      //   3TB st1 seems to saturate around 550 iops. Anything above that indicates a transient boost.
-      if (600 < slow_dev_r_iops)
+  if (_options.sla_admin_type == "latency") {
+    // No adjustment when the latency spikes by more than 3.0x.
+    //   Only when there is enough latency data in _lat_hist
+    //   This is to filter out high latencies that were not filtered out by the above test.
+    //     The inaccuracy is caused from the sporadic, client-measured adjustments.
+    //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
+    //       Still won't be easy to be perfect.
+    lock_guard<mutex> _(_lat_hist_lock);
+    if (_options.sla_observed_value_hist_q_size <= _lat_hist.size()) {
+      double running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
+      if (running_avg * 3.0 < lat) {
         make_adjustment = false;
+      }
     }
+  } else if (_options.sla_admin_type == "slow_dev_r_iops") {
+    // Filter out transient high read IOs probably caused by SSTable compactions / migrations.
+    //   3TB st1 seems to saturate around 550 iops. Anything above that indicates a transient boost.
+    if (600 < slow_dev_r_iops)
+      make_adjustment = false;
   }
 
   // Log current latency even when sla_admin is not used or no adjustment is needed
@@ -1020,8 +1004,10 @@ void Mutant::_SlaAdminAdjust(double lat) {
   _LogSstStatus(cur_time, &jwriter);
 
   if (make_adjustment) {
-    if (!_sst_ott_change_advised_time.is_not_a_date_time()) {
-      if ((cur_time - _sst_ott_change_advised_time).total_milliseconds() < _options.sst_ott_adj_cooldown_ms) {
+    // No adjustment when there is a write going on any of the SSTables
+    lock_guard<mutex> _(_last_sst_write_time_lock);
+    if (!_last_sst_write_time.is_not_a_date_time()) {
+      if ((cur_time - _last_sst_write_time).total_milliseconds() < _options.sst_ott_adj_cooldown_ms) {
         jwriter << "adj_type" << "cool_down";
         make_adjustment = false;
       }
@@ -1193,10 +1179,38 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
     }
     // Take the average when (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
     new_sst_ott = (sst_temps[i-1] + sst_temps[i]) / 2.0;
-
-    _sst_ott_change_advised_time = cur_time;
   }
   _sst_ott = new_sst_ott;
+}
+
+
+void Mutant::_SetNumRunningCompactions(int n) {
+  if (! _initialized)
+    return;
+
+  lock_guard<mutex> _(_last_sst_write_time_lock);
+  _num_running_compactions = n;
+  if (0 < _num_running_compactions + _num_running_flushes) {
+    // Assign not-a-date-time
+    _last_sst_write_time = boost::posix_time::ptime();
+  } else if (0 == _num_running_compactions + _num_running_flushes) {
+    _last_sst_write_time = boost::posix_time::microsec_clock::local_time();
+  }
+}
+
+
+void Mutant::_SetNumRunningFlushes(int n) {
+  if (! _initialized)
+    return;
+
+  lock_guard<mutex> _(_last_sst_write_time_lock);
+  _num_running_flushes = n;
+  if (0 < _num_running_compactions + _num_running_flushes) {
+    // Assign not-a-date-time
+    _last_sst_write_time = boost::posix_time::ptime();
+  } else if (0 == _num_running_compactions + _num_running_flushes) {
+    _last_sst_write_time = boost::posix_time::microsec_clock::local_time();
+  }
 }
 
 
@@ -1364,6 +1378,18 @@ void Mutant::SlaAdminInit(double target_lat, double p, double i, double d) {
 void Mutant::SlaAdminAdjust(double lat) {
   static Mutant& i = _GetInst();
   i._SlaAdminAdjust(lat);
+}
+
+
+void Mutant::SetNumRunningCompactions(int n) {
+  static Mutant& i = _GetInst();
+  i._SetNumRunningCompactions(n);
+}
+
+
+void Mutant::SetNumRunningFlushes(int n) {
+  static Mutant& i = _GetInst();
+  i._SetNumRunningFlushes(n);
 }
 
 

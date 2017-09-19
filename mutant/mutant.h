@@ -115,10 +115,11 @@ class Mutant {
   std::deque<double> _lat_hist;
   std::mutex _slow_dev_r_iops_hist_lock;
   std::deque<double> _slow_dev_r_iops_hist;
-  boost::posix_time::ptime _sst_ott_change_advised_time;
 
-  std::mutex _no_comp_flush_cnt_lock;
-  int _no_comp_flush_cnt = 0;
+  std::mutex _last_sst_write_time_lock;
+  boost::posix_time::ptime _last_sst_write_time;
+  int _num_running_compactions = 1000;
+  int _num_running_flushes = 1000;
 
   static Mutant& _GetInst();
 
@@ -154,6 +155,9 @@ class Mutant {
   void _AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter);
   void _LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter* jwriter);
 
+  void _SetNumRunningCompactions(int n);
+  void _SetNumRunningFlushes(int n);
+
   void _Shutdown();
 
   const DBOptions::MutantOptions* _Options();
@@ -180,6 +184,9 @@ public:
   //   An advantage of the client-observed one is that the DB doesn't need to know the specifics of the storage such as cost.
   //     It can be configured from outside.
   static void SlaAdminAdjust(double lat);
+
+  static void SetNumRunningCompactions(int n);
+  static void SetNumRunningFlushes(int n);
 
   static void Shutdown();
 
