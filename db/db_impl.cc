@@ -5750,6 +5750,10 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   bbto.pin_l0_filter_and_index_blocks_in_cache = true;
   bbto.cache_index_and_filter_blocks = true;
   cf_options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbto));
+  // Mutant: make compaction jobs more predictable. Helps getting predictable throughput - latency curves.
+  cf_options.level0_file_num_compaction_trigger = 4;
+  cf_options.level0_slowdown_writes_trigger = 4;
+  cf_options.level0_stop_writes_trigger = 4;
 
   std::vector<ColumnFamilyDescriptor> column_families;
   column_families.push_back(
@@ -5780,6 +5784,11 @@ Status DB::Open1(const Options& options, const std::string& dbname,
     bbto.pin_l0_filter_and_index_blocks_in_cache = true;
     bbto.cache_index_and_filter_blocks = true;
     cfd.options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbto));
+
+    // Mutant: make compaction jobs more predictable. Helps getting predictable throughput - latency curves.
+    cfd.options.level0_file_num_compaction_trigger = 4;
+    cfd.options.level0_slowdown_writes_trigger = 4;
+    cfd.options.level0_stop_writes_trigger = 4;
   }
 
   DBOptions db_options(options);
