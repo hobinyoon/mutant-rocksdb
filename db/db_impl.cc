@@ -5754,6 +5754,8 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   cf_options.level0_file_num_compaction_trigger = 4;
   cf_options.level0_slowdown_writes_trigger = 4;
   cf_options.level0_stop_writes_trigger = 4;
+  cf_options.soft_pending_compaction_bytes_limit = 256 * 1024 * 1024;
+  cf_options.hard_pending_compaction_bytes_limit = 256 * 1024 * 1024;
 
   std::vector<ColumnFamilyDescriptor> column_families;
   column_families.push_back(
@@ -5789,6 +5791,8 @@ Status DB::Open1(const Options& options, const std::string& dbname,
     cfd.options.level0_file_num_compaction_trigger = 4;
     cfd.options.level0_slowdown_writes_trigger = 4;
     cfd.options.level0_stop_writes_trigger = 4;
+    cfd.options.soft_pending_compaction_bytes_limit = 256 * 1024 * 1024;
+    cfd.options.hard_pending_compaction_bytes_limit = 256 * 1024 * 1024;
   }
 
   DBOptions db_options(options);
