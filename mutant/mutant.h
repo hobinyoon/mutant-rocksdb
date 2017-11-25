@@ -66,7 +66,7 @@ class Mutant {
   //
   // It only affects the temp updater thread when to update, and it's ok that
   // it's delayed by a tiny little bit, due to the relaxed cache coherency.
-  bool _updatedSinceLastOutput;
+  bool _updatedSinceLastOutput = false;
 
   // SSTable access monitoring is for the SSTable migration decisions.
   // MemTable access monitoring is just to see/understand what's going on
@@ -123,8 +123,6 @@ class Mutant {
 
   static Mutant& _GetInst();
 
-  Mutant();
-
   void _Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* el);
   void _MemtCreated(ColumnFamilyData* cfd, MemTable* m);
   void _MemtDeleted(MemTable* m);
@@ -161,6 +159,11 @@ class Mutant {
   void _Shutdown();
 
   const DBOptions::MutantOptions* _Options();
+
+
+protected:
+  Mutant();
+
 
 public:
   static void Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* el);

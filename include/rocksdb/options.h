@@ -1365,8 +1365,12 @@ struct DBOptions {
 
     // SSTable organization
     bool migrate_sstables;
-    double sst_ott;
     bool organize_L0_sstables;
+
+    // In %/GB/month
+    // Storage cost list from fastest to slowest
+    std::vector<double> stg_cost_list;
+    double stg_cost_slo;
 
     // SSTable metadata organization
     bool cache_filter_index_at_all_levels;

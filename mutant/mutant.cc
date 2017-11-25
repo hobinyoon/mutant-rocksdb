@@ -14,7 +14,6 @@
 using namespace std;
 
 namespace rocksdb {
-double _sst_ott;
 
 const double TEMP_UNINITIALIZED = -1.0;
 double TEMP_DECAY_FACTOR = 0.999;
@@ -217,6 +216,7 @@ public:
 };
 
 
+// TODO: Probably not needed anymore
 class DiskMon {
 private:
 	string _fn;
@@ -292,16 +292,18 @@ public:
 
 
 Mutant& Mutant::_GetInst() {
+  // The object instance won't be released since it's static, singleton.
   static Mutant i;
   return i;
 }
 
 
-// This object is not released, since it's a singleton object.
 Mutant::Mutant()
-: _updatedSinceLastOutput(false)
 {
 }
+
+
+// TODO: remove all sst_ott
 
 
 void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* el) {
@@ -323,8 +325,6 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
     return;
 
   TEMP_DECAY_FACTOR = _options.temp_decay_factor;
-
-  _sst_ott = _options.sst_ott;
 
   _db = db;
   _logger = el;
@@ -559,16 +559,18 @@ uint32_t Mutant::_CalcOutputPathId(
   // output_path_id starts from the min of input path_ids in case none of the temperatures is defined.
   uint32_t output_path_id = *std::min_element(input_sst_path_id.begin(), input_sst_path_id.end());
 
+  // TODO: Calc using the knapsack-based SSTable organizer.
+  //   The greedy algorithm is so simple. You can do it online.
+
+  output_path_id = 0;
+
+  // TODO: clean up
+  //
   // If the average input SSTable tempereture is below sst_ott, output_path_id = 1.
   //
   // This needs to be the weighted average using the input SSTable sizes. To be precise. It's ok for now.
   if (input_sst_temp.size() > 0) {
-    double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
-    if (_sst_ott < avg) {
-      output_path_id = 0;
-    } else {
-      output_path_id = 1;
-    }
+    output_path_id = 0;
   }
 
   {
@@ -604,15 +606,15 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   uint32_t output_path_id = path_id;
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+
+  // TODO: knapsack-based optimization
   double temp = _SstTemperature(sst_id, cur_time);
+
   if (temp == TEMP_UNINITIALIZED) {
     // When undefined, keep the current path_id
   } else {
-    if (_sst_ott < temp) {
-      output_path_id = 0;
-    } else {
-      output_path_id = 1;
-    }
+    // TODO: knapsack-based optimization
+    output_path_id = 0;
   }
 
   JSONWriter jwriter;
@@ -655,84 +657,84 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
-  lock_guard<mutex> _(_sstMapLock);
-  for (auto i: _sstMap) {
-    uint64_t sst_id = i.first;
-    SstTemp* st = i.second;
-    int level = i.second->Level();
-    // We don't consider level -1 (there used to be, not anymore).
-    if (level < 0)
-      continue;
+  // TODO: Do a knapsack problem solving and pick one that needs to be moved the most.
+  //   A hot SSTable in the slow storage needs to be moved to the fast storage
+  //     When there are multiple of those, which one should you pick?
+  //       The currenly hottest temperature SSTable. It will have the biggest performance impact.
+  //   A cold SSTable in the fast storage that needs to be moved to the slow storage
+  //     Pik the coldest one first. Makes sense.
 
-    if ((!_options.organize_L0_sstables) && level == 0)
-      continue;
+  //lock_guard<mutex> _(_sstMapLock);
+  //for (auto i: _sstMap) {
+  //  uint64_t sst_id = i.first;
+  //  SstTemp* st = i.second;
+  //  int level = i.second->Level();
+  //  // We don't consider level -1 (there used to be, not anymore).
+  //  if (level < 0)
+  //    continue;
 
-    double temp = st->Temp(cur_time);
-    // We don't move SSTables without temperature
-    if (temp == TEMP_UNINITIALIZED)
-      continue;
+  //  if ((!_options.organize_L0_sstables) && level == 0)
+  //    continue;
 
-    uint32_t path_id = st->PathId();
-    if (path_id == 0) {
-      if (temp < _sst_ott)
-        temp_sstid_in_fast_dev[temp] = sst_id;
-    } else {
-      if (_sst_ott < temp)
-        temp_sstid_in_slow_dev[temp] = sst_id;
-    }
-  }
+  //  double temp = st->Temp(cur_time);
+  //  // We don't move SSTables without temperature
+  //  if (temp == TEMP_UNINITIALIZED)
+  //    continue;
+
+  //  uint32_t path_id = st->PathId();
+  //}
 
   // Get the hottest sstable above sst_ott first. We do this first since we favor low latency, in case there are SSTables to be organized on both
   // sides of sst_ott.
-  for (auto it = temp_sstid_in_slow_dev.rbegin(); it != temp_sstid_in_slow_dev.rend(); it ++) {
-    uint64_t sst_id = it->second;
+  //for (auto it = temp_sstid_in_slow_dev.rbegin(); it != temp_sstid_in_slow_dev.rend(); it ++) {
+  //  uint64_t sst_id = it->second;
 
-    int filelevel;
-    FileMetaData* fmd = nullptr;
-    ColumnFamilyData* cfd;
-    Status s = _db->MutantGetMetadataForFile(sst_id, &filelevel, &fmd, &cfd);
-    if (s.code() == Status::kNotFound) {
-      // This rarely happens, but happens. Ignore the sst.
-      continue;
-    }
-    if (!s.ok())
-      THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
-    if (!fmd)
-      THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
+  //  int filelevel;
+  //  FileMetaData* fmd = nullptr;
+  //  ColumnFamilyData* cfd;
+  //  Status s = _db->MutantGetMetadataForFile(sst_id, &filelevel, &fmd, &cfd);
+  //  if (s.code() == Status::kNotFound) {
+  //    // This rarely happens, but happens. Ignore the sst.
+  //    continue;
+  //  }
+  //  if (!s.ok())
+  //    THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
+  //  if (!fmd)
+  //    THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
 
-    if (fmd->being_compacted)
-      continue;
+  //  if (fmd->being_compacted)
+  //    continue;
 
-    level_for_migration = filelevel;
+  //  level_for_migration = filelevel;
 
-    // There is no guarantee that the fmd points to a live SSTable after it is
-    // returned. I think the sames goes with the regular compaction picking path.
-    // Hope the compaction implementation takes care of it.
-    return fmd;
-  }
+  //  // There is no guarantee that the fmd points to a live SSTable after it is
+  //  // returned. I think the sames goes with the regular compaction picking path.
+  //  // Hope the compaction implementation takes care of it.
+  //  return fmd;
+  //}
 
-  // Get the coldest sst below sst_ott
-  for (auto it = temp_sstid_in_fast_dev.begin(); it != temp_sstid_in_fast_dev.end(); it ++) {
-    uint64_t sst_id = it->second;
+  //// Get the coldest sst below sst_ott
+  //for (auto it = temp_sstid_in_fast_dev.begin(); it != temp_sstid_in_fast_dev.end(); it ++) {
+  //  uint64_t sst_id = it->second;
 
-    int filelevel;
-    FileMetaData* fmd = nullptr;
-    ColumnFamilyData* cfd;
-    Status s = _db->MutantGetMetadataForFile(sst_id, &filelevel, &fmd, &cfd);
-    if (s.code() == Status::kNotFound) {
-      continue;
-    }
-    if (!s.ok())
-      THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
-    if (!fmd)
-      THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
+  //  int filelevel;
+  //  FileMetaData* fmd = nullptr;
+  //  ColumnFamilyData* cfd;
+  //  Status s = _db->MutantGetMetadataForFile(sst_id, &filelevel, &fmd, &cfd);
+  //  if (s.code() == Status::kNotFound) {
+  //    continue;
+  //  }
+  //  if (!s.ok())
+  //    THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
+  //  if (!fmd)
+  //    THROW(boost::format("Unexpected: s=%s sst_id=%d") % s.ToString() % sst_id);
 
-    if (fmd->being_compacted)
-      continue;
+  //  if (fmd->being_compacted)
+  //    continue;
 
-    level_for_migration = filelevel;
-    return fmd;
-  }
+  //  level_for_migration = filelevel;
+  //  return fmd;
+  //}
 
   // No SSTable to migrate.
   return nullptr;
@@ -910,18 +912,19 @@ void Mutant::_SstMigrationTriggererRun() {
           if (temp == TEMP_UNINITIALIZED)
             continue;
 
-          uint32_t path_id = st->PathId();
-          if (path_id == 0) {
-            if (temp < _sst_ott) {
-              may_have_sstable_to_migrate = true;
-              break;
-            }
-          } else {
-            if (_sst_ott < temp) {
-              may_have_sstable_to_migrate = true;
-              break;
-            }
-          }
+          // TODO
+          //uint32_t path_id = st->PathId();
+          //if (path_id == 0) {
+          //  if (temp < _sst_ott) {
+          //    may_have_sstable_to_migrate = true;
+          //    break;
+          //  }
+          //} else {
+          //  if (_sst_ott < temp) {
+          //    may_have_sstable_to_migrate = true;
+          //    break;
+          //  }
+          //}
         }
       }
 
@@ -1053,8 +1056,6 @@ void Mutant::_SlaAdminAdjust(double lat) {
 // The number of SSTables in fast and slow devices.
 // The number of SSTables that would be in fast and slow devices based on the current sst_ott.
 void Mutant::_LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter* jwriter) {
-  (*jwriter) << "sst_ott" << _sst_ott;
-
   int num_ssts_fast = 0;
   int num_ssts_slow = 0;
   int num_ssts_fast_should_be = 0;
@@ -1067,7 +1068,11 @@ void Mutant::_LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter*
       SstTemp* st = i.second;
       double temp = st->Temp(cur_time);
       uint32_t path_id = st->PathId();
-      uint32_t path_id_should_be = (_sst_ott < temp) ? 0 : 1;
+
+      // TODO
+      //uint32_t path_id_should_be = (_sst_ott < temp) ? 0 : 1;
+      uint32_t path_id_should_be = 0;
+
       if (path_id == 0) {
         num_ssts_fast ++;
       } else {
@@ -1149,41 +1154,43 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
     return;
   }
 
-  // We make organizations by adjusting sst_ott little by little.
-  //
-  // Directly sorting SSTables by their temperatures and move one at the boundary may be intuitive, but won't work.
-  //   Because an SSTable temperature changes over time and some hot SSTables can be in slow dev or some cold SSTables can be in fast dev.
-
-  // Find where the current _sst_ott belongs in the sorted SSTable temperatures
-  int i = 0;
-  for ( ; i < s; i ++) {
-    if (_sst_ott < sst_temps[i])
-      break;
-  }
-  // Now (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
-  if (sst_ott_adj == 1) {
-    i ++;
-  } else if (sst_ott_adj == -1) {
-    i --;
-  }
-
-  double new_sst_ott;
-  if (i <= 0) {
-    new_sst_ott = 0.0;
-    (*jwriter) << "adj_type" << "no_change_lowest";
-  } else if (s <= i) {
-    new_sst_ott = sst_temps[s-1] + 1.0;
-    (*jwriter) << "adj_type" << "no_change_highest";
-  } else {
-    if (sst_ott_adj == 1) {
-      (*jwriter) << "adj_type" << "move_sst_to_slow";
-    } else if (sst_ott_adj == -1) {
-      (*jwriter) << "adj_type" << "move_sst_to_fast";
-    }
-    // Take the average when (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
-    new_sst_ott = (sst_temps[i-1] + sst_temps[i]) / 2.0;
-  }
-  _sst_ott = new_sst_ott;
+// TODO: clean up
+//
+//  // We make organizations by adjusting sst_ott little by little.
+//  //
+//  // Directly sorting SSTables by their temperatures and move one at the boundary may be intuitive, but won't work.
+//  //   Because an SSTable temperature changes over time and some hot SSTables can be in slow dev or some cold SSTables can be in fast dev.
+//
+//  // Find where the current _sst_ott belongs in the sorted SSTable temperatures
+//  int i = 0;
+//  for ( ; i < s; i ++) {
+//    if (_sst_ott < sst_temps[i])
+//      break;
+//  }
+//  // Now (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
+//  if (sst_ott_adj == 1) {
+//    i ++;
+//  } else if (sst_ott_adj == -1) {
+//    i --;
+//  }
+//
+//  double new_sst_ott;
+//  if (i <= 0) {
+//    new_sst_ott = 0.0;
+//    (*jwriter) << "adj_type" << "no_change_lowest";
+//  } else if (s <= i) {
+//    new_sst_ott = sst_temps[s-1] + 1.0;
+//    (*jwriter) << "adj_type" << "no_change_highest";
+//  } else {
+//    if (sst_ott_adj == 1) {
+//      (*jwriter) << "adj_type" << "move_sst_to_slow";
+//    } else if (sst_ott_adj == -1) {
+//      (*jwriter) << "adj_type" << "move_sst_to_fast";
+//    }
+//    // Take the average when (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
+//    new_sst_ott = (sst_temps[i-1] + sst_temps[i]) / 2.0;
+//  }
+//  _sst_ott = new_sst_ott;
 }
 
 

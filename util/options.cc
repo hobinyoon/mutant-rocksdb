@@ -17,6 +17,9 @@
 #include <inttypes.h>
 #include <limits>
 
+#include <boost/algorithm/string/join.hpp>
+#include <boost/range/adaptor/transformed.hpp>
+
 #include "rocksdb/cache.h"
 #include "rocksdb/compaction_filter.h"
 #include "rocksdb/comparator.h"
@@ -495,8 +498,11 @@ void DBOptions::DumpMutantOptions(Logger* log) const {
   Header(log, "  temp_decay_factor: %f", mutant_options.temp_decay_factor);
 
   Header(log, "  migrate_sstables: %d", mutant_options.migrate_sstables);
-  Header(log, "  sst_ott: %f", mutant_options.sst_ott);
   Header(log, "  organize_L0_sstables: %d", mutant_options.organize_L0_sstables);
+
+  Header(log, "  stg_cost_list: %s",
+      boost::algorithm::join(mutant_options.stg_cost_list | boost::adaptors::transformed([](double d) { return std::to_string(d); }), " "));
+  Header(log, "  stg_cost_slo: %f", mutant_options.stg_cost_slo);
 
   Header(log, "  cache_filter_index_at_all_levels: %d", mutant_options.cache_filter_index_at_all_levels);
 
@@ -884,8 +890,8 @@ DBOptions::MutantOptions::MutantOptions()
   : monitor_temp(false)
     , temp_decay_factor(0.999)
     , migrate_sstables(false)
-    , sst_ott(20.0)
     , organize_L0_sstables(false)
+    , stg_cost_slo(-1)
     , cache_filter_index_at_all_levels(false)
     , replaying(false)
     , simulated_time_dur_sec(0.0)

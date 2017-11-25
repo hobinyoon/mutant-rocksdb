@@ -4308,15 +4308,18 @@ void Java_org_rocksdb_Options_setMutantOptionsEncoded(
   // When non-zero, we also force new_table_reader_for_compaction_inputs to true.
   options->compaction_readahead_size = 2 * 1024 * 1024;
 
-  for (auto i: json_root.get("db_stg_dev_paths", "")) {
-    options->db_paths.emplace_back(i.asString(), 200L*1024*1024*1024);
+  for (auto i: json_root.get("db_stg_devs", "")) {
+    // Give enough max space for now. Mutant doesn't use it. With 200 GB, RocksDB will store all SSTables in the first path.
+    options->db_paths.emplace_back(i[0].asString(), 200L*1024*1024*1024);
+    options->mutant_options.stg_cost_list.push_back(i[1].asDouble());
   }
 
   options->mutant_options.monitor_temp = _GetBool(json_root, "monitor_temp");
   options->mutant_options.migrate_sstables = _GetBool(json_root, "migrate_sstables");
-  options->mutant_options.sst_ott = json_root.get("sst_ott", 0).asDouble();
 
   options->mutant_options.cache_filter_index_at_all_levels = _GetBool(json_root, "cache_filter_index_at_all_levels");
+
+  options->mutant_options.stg_cost_slo = json_root.get("stg_cost_slo", -1).asDouble();
 
   options->mutant_options.replaying = json_root.isMember("replaying");
   if (options->mutant_options.replaying) {
