@@ -26,6 +26,7 @@ long _sst_migration_triggerer_interval_sec;
 double _simulation_time_dur_over_simulated = 0.0;
 
 
+// SSTable and its temperature
 class SstTemp {
   TableReader* _tr;
   boost::posix_time::ptime _created;
@@ -354,14 +355,17 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
   jwriter.EndObject();
   _logger->Log(jwriter);
 
-  // Let the threads start here! In the constructor, some of the members are not set yet.
+  // The threads start here, not in the constructor, where some of the members are not set yet.
   if (_temp_updater_thread)
     THROW("Unexpcted");
   _temp_updater_thread = new thread(bind(&rocksdb::Mutant::_TempUpdaterRun, this));
 
   // _smt_thread is needed only with migrate_sstables
-  if (_options.migrate_sstables)
+  if (_options.migrate_sstables) {
+    if (_smt_thread)
+      THROW("Unexpcted");
     _smt_thread = new thread(bind(&rocksdb::Mutant::_SstMigrationTriggererRun, this));
+  }
 
   _initialized = true;
 }
@@ -375,11 +379,16 @@ void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
 
   lock_guard<mutex> lk(_memtSetLock_OpenedClosed);
 
+  if (cfd->GetName() != "usertable") {
+    TRACE << cfd->GetName() << "\n";
+    return;
+  }
+
   if (_cfd == nullptr) {
     _cfd = cfd;
   } else {
     if (_cfd != cfd)
-      THROW("Unexpected");
+      THROW(boost::format("Unexpected: %p %s %p %s") % _cfd % _cfd->GetName() % cfd % cfd->GetName());
   }
 
   //TRACE << boost::format("MemtCreated %p\n") % m;
@@ -425,8 +434,10 @@ void Mutant::_MemtDeleted(MemTable* m) {
 
 
 void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
-  if (! _initialized)
+  if (! _initialized) {
+    TRACE << "Interesting...\n";
     return;
+  }
   if (! _options.monitor_temp)
     return;
 
@@ -655,7 +666,7 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
   map<double, uint64_t> temp_sstid_in_fast_dev;
   map<double, uint64_t> temp_sstid_in_slow_dev;
 
-  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+  //boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
   // TODO: Do a knapsack problem solving and pick one that needs to be moved the most.
   //   A hot SSTable in the slow storage needs to be moved to the fast storage
@@ -753,8 +764,7 @@ void Mutant::_TempUpdaterRun() {
 
         boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
-        // A 2-level check. _temp_updater_sleep_cv alone is not enough, since this
-        // thread is woken up every second anyway.
+        // A 2-level check. _temp_updater_sleep_cv alone is not enough since this thread is woken up every second anyway.
         //
         // Print out the access stat. The entries are already sorted numerically.
         if (_updatedSinceLastOutput) {
@@ -793,7 +803,7 @@ void Mutant::_TempUpdaterRun() {
               double reads_per_64MB_per_sec = double(c) / (st->Size() / (64.0*1024*1024)) / dur_since_last_update;
 
               // Update temperature. You don't need to update st when c == 0.
-              if (c > 0)
+              if (0 < c)
                 st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
 
               sst_status_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
@@ -877,7 +887,7 @@ void Mutant::_RunTempUpdaterAndWait() {
 }
 
 
-// Schedule a background SSTable compaction when there may be an SSTable to be migrated.
+// Schedule a background SSTable compaction when an SSTable needs to be migrated.
 //
 // When you schedule a background compaction and there is no compaction to do, you get a "Compaction nothing to do".
 //   Though seems harmless, you don't want unnecessarily scheduling of compactions.
@@ -899,6 +909,40 @@ void Mutant::_SstMigrationTriggererRun() {
       boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
       {
         lock_guard<mutex> _(_sstMapLock);
+
+        // Greedy knapsack solving
+
+        // TODO: Calc the total size of SSTables that can go to the fast storage.
+
+        // TODO: Sort the SSTables by their temperatures
+
+        // TODO: Group SSTables into fast and slow storage
+
+        //for (auto i: _sstMap) {
+        //  SstTemp* st = i.second;
+        //  double temp = st->Temp(cur_time);
+        //  // TODO
+        //}
+
+        // TODO: How do you implement hysterisis?
+        //   By not migrating an SSTable when it's too young. Like for the next 30 seconds.
+        //     It will have a negative effect on how well you enforce the cost SLO.
+        //
+        //   What else?
+
+        // TODO: Implementing _options.organize_L0_sstables
+        //   You can assign them to the fast storage before any SSTables. Sounds good.
+
+
+        //_options.stg_cost_list;
+        //double budget = _options.stg_cost_slo;
+
+
+
+        // You will need hysterisis here. Without it, there can be a lot of back and forth movement near the boundary.
+
+
+
         for (auto i: _sstMap) {
           SstTemp* st = i.second;
           int level = i.second->Level();
@@ -1122,21 +1166,21 @@ void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_ti
   if (!make_adjustment)
     return;
 
-  double pid_adj = _sla_admin->CalcAdj(cur_value, *jwriter);
+  //double pid_adj = _sla_admin->CalcAdj(cur_value, *jwriter);
   // When 0 < pid_adj, target_value is bigger. should increase slow dev iops. should raise sst_ott.
 
-  int sst_ott_adj = 0;
-  if (pid_adj < _options.error_adj_ranges[0]) {
-    // target_value < observed_value. should decrease slow dev iops. should lower sst_ott.
-    sst_ott_adj = -1;
-  } else if (pid_adj < _options.error_adj_ranges[1]) {
-    // pid_adj is within the error margin. make no adjustment.
-    (*jwriter) << "adj_type" << "no_change";
-    return;
-  } else {
-    // observed_value < target_value. should increase slow dev iops. should raise sst_ott.
-    sst_ott_adj = 1;
-  }
+//  int sst_ott_adj = 0;
+//  if (pid_adj < _options.error_adj_ranges[0]) {
+//    // target_value < observed_value. should decrease slow dev iops. should lower sst_ott.
+//    sst_ott_adj = -1;
+//  } else if (pid_adj < _options.error_adj_ranges[1]) {
+//    // pid_adj is within the error margin. make no adjustment.
+//    (*jwriter) << "adj_type" << "no_change";
+//    return;
+//  } else {
+//    // observed_value < target_value. should increase slow dev iops. should raise sst_ott.
+//    sst_ott_adj = 1;
+//  }
 
   vector<double> sst_temps;
   {

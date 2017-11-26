@@ -5844,6 +5844,18 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
     delete impl;
     return s;
   }
+
+  try {
+    db_options.DumpMutantOptions(impl->db_options_.info_log.get());
+
+    // Assume Mutant is used by a single DB instance, which makes sense cause it's an embedded DB.
+    Mutant::Init(&(db_options.mutant_options), impl, &(impl->event_logger_));
+  } catch (const std::runtime_error& e) {
+    std::string str = std::string("Mutant Exception: ") + e.what();
+    std::cerr << str << "\n";
+    s = Status::InvalidArgument(str);
+  }
+
   impl->mutex_.Lock();
   // Handles create_if_missing, error_if_exists
   s = impl->Recover(column_families);
@@ -5944,16 +5956,7 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
     impl->opened_successfully_ = true;
     impl->MaybeScheduleFlushOrCompaction();
 
-    try {
-      db_options.DumpMutantOptions(impl->db_options_.info_log.get());
-
-      // Assume Mutant is used by a single DB instance, which makes sense cause it's an embedded DB.
-      Mutant::Init(&(db_options.mutant_options), impl, &(impl->event_logger_));
-    } catch (const std::runtime_error& e) {
-      std::string str = std::string("Mutant Exception: ") + e.what();
-      std::cerr << str << "\n";
-      s = Status::InvalidArgument(str);
-    }
+    // Mutant: Mutant::Init() used to be here and wasn't able to catch opening existing SSTables. Moved to above.
   }
   impl->mutex_.Unlock();
 
