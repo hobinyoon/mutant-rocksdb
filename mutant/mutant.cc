@@ -364,7 +364,19 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
   if (_options.migrate_sstables) {
     if (_smt_thread)
       THROW("Unexpcted");
-    _smt_thread = new thread(bind(&rocksdb::Mutant::_SstMigrationTriggererRun, this));
+
+    size_t num_stgs = _options.stg_cost_list.size();
+    if (num_stgs == 1) {
+      // No need for migration. All SSTables go to the first, the only storage.
+    } else if (num_stgs == 2) {
+      if (! ((_options.stg_cost_list[1] <= _options.stg_cost_slo) && (_options.stg_cost_slo <= _options.stg_cost_list[0])))
+        THROW(boost::format("Unexpected: %f %f %f") % _options.stg_cost_list[0], _options.stg_cost_list[1], _options.stg_cost_slo);
+
+      // Do the knapsack-based SSTable organization.
+      _smt_thread = new thread(bind(&rocksdb::Mutant::_SstMigrationTriggererRun, this));
+    } else {
+      THROW(boost::format("Unexpected: %d") % num_stgs);
+    }
   }
 
   _initialized = true;
@@ -906,23 +918,51 @@ void Mutant::_SstMigrationTriggererRun() {
       // Schedule a compaction only when there is an SSTable to be compacted.
       //   This is an initial, quick check. _PickSstToMigrate() does a full check later.
       bool may_have_sstable_to_migrate = false;
+
       boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+
       {
         lock_guard<mutex> _(_sstMapLock);
 
         // Greedy knapsack solving
 
         // TODO: Calc the total size of SSTables that can go to the fast storage.
+        uint64_t total_sst_size = 0;
+        for (auto i: _sstMap) {
+          SstTemp* st = i.second;
+          total_sst_size += st->Size();
+        }
+
+        // The conditions were checked before
+        //   _options.stg_cost_list.size() == 2
+        //   _options.stg_cost_list[1] <= _options.stg_cost_slo <= _options.stg_cost_list[0]
+        //
+        // c[1] : when you put all SSTables in slow storage
+        // b    : TODO
+        // c[0] : when you put all SSTables in the fast storage
+
+        _options.stg_cost_list[0];
+        _options.stg_cost_list[1];
+
+        double budget = _options.stg_cost_slo;
+
+        //
+
+
+
+
+
+
+
+          // TODO
+          //double temp = st->Temp(cur_time);
+
+
 
         // TODO: Sort the SSTables by their temperatures
 
         // TODO: Group SSTables into fast and slow storage
 
-        //for (auto i: _sstMap) {
-        //  SstTemp* st = i.second;
-        //  double temp = st->Temp(cur_time);
-        //  // TODO
-        //}
 
         // TODO: How do you implement hysterisis?
         //   By not migrating an SSTable when it's too young. Like for the next 30 seconds.
@@ -934,8 +974,6 @@ void Mutant::_SstMigrationTriggererRun() {
         //   You can assign them to the fast storage before any SSTables. Sounds good.
 
 
-        //_options.stg_cost_list;
-        //double budget = _options.stg_cost_slo;
 
 
 
