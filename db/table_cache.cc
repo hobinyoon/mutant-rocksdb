@@ -145,6 +145,9 @@ Status TableCache::FindTable(const EnvOptions& env_options,
   TEST_SYNC_POINT_CALLBACK("TableCache::FindTable:0",
                            const_cast<bool*>(&no_io));
 
+  //TRACE << boost::format("fd.GetNumber()=%d no_io=%d level=%d handle=%p *handle=%p\n")
+  //  % fd.GetNumber() % no_io % level % handle % (*handle);
+
   if (*handle == nullptr) {
     if (no_io) {  // Don't do IO and return a not-found status
       return Status::Incomplete("Table not found in table_cache, no_io is set");
@@ -163,8 +166,7 @@ Status TableCache::FindTable(const EnvOptions& env_options,
       s = cache_->Insert(key, table_reader.get(), 1, &DeleteEntry<TableReader>,
                          handle);
       if (s.ok()) {
-        // Mutant: Limit this to the "default" CF. Do you need to? RocksDB
-        // seems to store only user SSTables. Then, no.
+        // Mutant: Limit this to the default, "usertable" CF. Maybe you don't need to since RocksDB seems to store those SSTables.
         Mutant::SstOpened(table_reader.get(), &fd, level);
 
         // Some of the SSTables used to have level -1. Not any more after

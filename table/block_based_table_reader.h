@@ -245,7 +245,7 @@ class BlockBasedTable : public TableReader {
     if (fd == NULL)
       THROW("Unexpected");
 
-    // We don't keep fd. It seems to change over the lifetime of this.
+    // Mutant doesn't keep fd. It seems to change over time.
     _sst_id = fd->GetNumber();
 
     // Mutant: Figuring out the level
@@ -259,9 +259,9 @@ class BlockBasedTable : public TableReader {
     //   rocksdb::BlockBasedTableFactory::NewTableReader(rocksdb::TableReaderOptions const&, std::unique_ptr<rocksdb::RandomAccessFileReader,
     //     std::default_delete <rocksdb::RandomAccessFileReader> >&&, unsigned long, std::unique_ptr<rocksdb::TableReader,
     //     std::default_delete<rocksdb::TableReader> >*, rocksdb::FileDescr iptor const*, bool) const
-    //   rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&,
-    //     bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader, std::default_delete<rocksdb::TableReader> >*,
-    //     bool, int, bool)
+    //   rocksdb::TableCache::GetTableReader(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor
+    //     const&, bool, unsigned long, bool, rocksdb::HistogramImpl*, std::unique_ptr<rocksdb::TableReader,
+    //     std::default_delete<rocksdb::TableReader> >*, bool, int, bool)
     //   rocksdb::TableCache::FindTable(rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&, rocksdb::FileDescriptor const&,
     //     rocksdb::Cache::Handle **, bool, bool, rocksdb::HistogramImpl*, bool, int, bool)
     //   rocksdb::TableCache::NewIterator(rocksdb::ReadOptions const&, rocksdb::EnvOptions const&, rocksdb::InternalKeyComparator const&,
