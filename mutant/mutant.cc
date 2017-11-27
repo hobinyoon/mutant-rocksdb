@@ -25,6 +25,9 @@ long _sst_migration_triggerer_interval_sec;
 // With the Quizup trace, 22.761826: the simulation time is 60,000 secs and the simulated time is 1365709.587 secs, almost 16 days.
 double _simulation_time_dur_over_simulated = 0.0;
 
+// In sec
+const long YOUNG_SST_AGE_CUTOFF = 30;
+
 
 // SSTable and its temperature
 class SstTemp {
@@ -80,8 +83,7 @@ public:
       // When you get a first accfreq, assume the same amount of accesses have
       // been there before for an infinite amount of time.
       //
-      // This might cause a peak in the beginning and prevent a compaction
-      // including this one from generating cold SSTables, but that's ok.
+      // This cause a peak when the SSTable is created, which is ok. The SSTable is just super hot.
       _temp = reads_per_64MB_per_sec;
       _last_updated = t;
     } else {
@@ -121,6 +123,11 @@ public:
 
   uint32_t PathId() {
     return _path_id;
+  }
+
+  // Returns the current SSTable age. Used for SSTable organization
+  long Age(const boost::posix_time::ptime& cur_time) {
+    return (cur_time - _created).total_seconds();
   }
 };
 
@@ -220,75 +227,75 @@ public:
 // TODO: Probably not needed anymore
 class DiskMon {
 private:
-	string _fn;
-	double _prev_ts = -1;
-	long _prev_read_ios = 0;
-	long _prev_write_ios = 0;
+  string _fn;
+  double _prev_ts = -1;
+  long _prev_read_ios = 0;
+  long _prev_write_ios = 0;
 
 public:
-	DiskMon(const string& dev) {
-		_fn = str(boost::format("/sys/block/%s/stat") % dev);
-	}
+  DiskMon(const string& dev) {
+    _fn = str(boost::format("/sys/block/%s/stat") % dev);
+  }
 
   // Get read and write iops. -1 when undefined.
-	void Get(double& r, double& w) {
-		// https://www.kernel.org/doc/Documentation/block/stat.txt
-		//
-		// Name            units         description
-		// ----            -----         -----------
-		// read I/Os       requests      number of read I/Os processed
-		// read merges     requests      number of read I/Os merged with in-queue I/O
-		// read sectors    sectors       number of sectors read
-		// read ticks      milliseconds  total wait time for read requests
-		// write I/Os      requests      number of write I/Os processed
-		// write merges    requests      number of write I/Os merged with in-queue I/O
-		// write sectors   sectors       number of sectors written
-		// write ticks     milliseconds  total wait time for write requests
-		// in_flight       requests      number of I/Os currently in flight
-		// io_ticks        milliseconds  total time this block device has been active
-		// time_in_queue   milliseconds  total wait time for all requests
-		//
-		// $ cat /sys/block/xvde/stat
-		// 144487        0  2303026   233216   428849 11938402 108265496 12622636        0   464196 12855836
-		string line;
-		{
-			ifstream ifs(_fn);
-			if (! getline(ifs, line))
-				THROW("Unexpected");
-		}
-		boost::trim(line);
-		static const auto sep = boost::is_any_of(" ");
-		vector<string> t;
-		boost::split(t, line, sep, boost::algorithm::token_compress_on);
-		if (t.size() != 11)
+  void Get(double& r, double& w) {
+    // https://www.kernel.org/doc/Documentation/block/stat.txt
+    //
+    // Name            units         description
+    // ----            -----         -----------
+    // read I/Os       requests      number of read I/Os processed
+    // read merges     requests      number of read I/Os merged with in-queue I/O
+    // read sectors    sectors       number of sectors read
+    // read ticks      milliseconds  total wait time for read requests
+    // write I/Os      requests      number of write I/Os processed
+    // write merges    requests      number of write I/Os merged with in-queue I/O
+    // write sectors   sectors       number of sectors written
+    // write ticks     milliseconds  total wait time for write requests
+    // in_flight       requests      number of I/Os currently in flight
+    // io_ticks        milliseconds  total time this block device has been active
+    // time_in_queue   milliseconds  total wait time for all requests
+    //
+    // $ cat /sys/block/xvde/stat
+    // 144487        0  2303026   233216   428849 11938402 108265496 12622636        0   464196 12855836
+    string line;
+    {
+      ifstream ifs(_fn);
+      if (! getline(ifs, line))
+        THROW("Unexpected");
+    }
+    boost::trim(line);
+    static const auto sep = boost::is_any_of(" ");
+    vector<string> t;
+    boost::split(t, line, sep, boost::algorithm::token_compress_on);
+    if (t.size() != 11)
       THROW(boost::format("Unexpected. %d [%s]\n") % t.size() % line);
-		long read_ios = atol(t[0].c_str());
-		long write_ios = atol(t[4].c_str());
+    long read_ios = atol(t[0].c_str());
+    long write_ios = atol(t[4].c_str());
 
-		timeval tv;
-		gettimeofday(&tv, 0);
-		double ts_now = tv.tv_sec + tv.tv_usec * 0.000001;
+    timeval tv;
+    gettimeofday(&tv, 0);
+    double ts_now = tv.tv_sec + tv.tv_usec * 0.000001;
 
-		if (_prev_ts == -1) {
-			r = -1;
-			w = -1;
-		} else {
-			long r_delta = read_ios - _prev_read_ios;
-			long w_delta = write_ios - _prev_write_ios;
-			double ts_delta = ts_now - _prev_ts;
-			if (ts_delta == 0.0) {
-				r = -1;
-				w = -1;
-			} else {
-				r = r_delta / ts_delta;
-				w = w_delta / ts_delta;
-			}
-		}
+    if (_prev_ts == -1) {
+      r = -1;
+      w = -1;
+    } else {
+      long r_delta = read_ios - _prev_read_ios;
+      long w_delta = write_ios - _prev_write_ios;
+      double ts_delta = ts_now - _prev_ts;
+      if (ts_delta == 0.0) {
+        r = -1;
+        w = -1;
+      } else {
+        r = r_delta / ts_delta;
+        w = w_delta / ts_delta;
+      }
+    }
 
-		_prev_ts = ts_now;
-		_prev_read_ios = read_ios;
-		_prev_write_ios = write_ios;
-	}
+    _prev_ts = ts_now;
+    _prev_read_ios = read_ios;
+    _prev_write_ios = write_ios;
+  }
 };
 
 
@@ -370,7 +377,7 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
       // No need for migration. All SSTables go to the first, the only storage.
     } else if (num_stgs == 2) {
       if (! ((_options.stg_cost_list[1] <= _options.stg_cost_slo) && (_options.stg_cost_slo <= _options.stg_cost_list[0])))
-        THROW(boost::format("Unexpected: %f %f %f") % _options.stg_cost_list[0], _options.stg_cost_list[1], _options.stg_cost_slo);
+        THROW(boost::format("Unexpected: %f %f %f") % _options.stg_cost_list[0] % _options.stg_cost_list[1] % _options.stg_cost_slo);
 
       // Do the knapsack-based SSTable organization.
       _smt_thread = new thread(bind(&rocksdb::Mutant::_SstMigrationTriggererRun, this));
@@ -825,7 +832,7 @@ void Mutant::_TempUpdaterRun() {
 
           // Output to the rocksdb log. The condition is just to reduce
           // memt-only logs. So not all memt stats are reported, which is okay.
-          if ((sst_status_str.size() > 0) && (_logger != nullptr)) {
+          if (sst_status_str.size() > 0) {
             JSONWriter jwriter;
             EventHelpers::AppendCurrentTime(&jwriter);
             jwriter << "mutant_table_acc_cnt";
@@ -926,49 +933,131 @@ void Mutant::_SstMigrationTriggererRun() {
 
         // Greedy knapsack solving
 
-        // TODO: Calc the total size of SSTables that can go to the fast storage.
-        uint64_t total_sst_size = 0;
-        for (auto i: _sstMap) {
-          SstTemp* st = i.second;
-          total_sst_size += st->Size();
-        }
+        {
+          // Calc the total size of SSTables that can go to the fast storage.
+          uint64_t total_sst_size = 0;
+          for (auto i: _sstMap) {
+            SstTemp* st = i.second;
+            total_sst_size += st->Size();
+          }
 
-        // The conditions were checked before
-        //   _options.stg_cost_list.size() == 2
-        //   _options.stg_cost_list[1] <= _options.stg_cost_slo <= _options.stg_cost_list[0]
-        //
-        // c[1] : when you put all SSTables in slow storage
-        // b    : TODO
-        // c[0] : when you put all SSTables in the fast storage
+          // The conditions were checked before
+          //   _options.stg_cost_list.size() == 2
+          //   _options.stg_cost_list[1] <= _options.stg_cost_slo <= _options.stg_cost_list[0]
 
-        _options.stg_cost_list[0];
-        _options.stg_cost_list[1];
+          double c0 = _options.stg_cost_list[0];
+          double c1 = _options.stg_cost_list[1];
+          double b = _options.stg_cost_slo;
 
-        double budget = _options.stg_cost_slo;
+          // c[1] : c[1] * S              -- (1) when you put all SSTables in the slow storage
+          // b    : c[1] * Ss + c[0] * Sf -- (2)
+          // c[0] : c[0] * S              --     when you put all SSTables in the fast storage
+          //
+          // S = Sf + Ss -- (3) Total SSTable size in fast and slow storages
+          // Ss = S - Sf
+          //
+          // From (1) and (2),
+          // c[1] * Ss + c[0] * Sf = c[1] * S * b / c[1] -- (4)
+          //
+          // From (3) and (4),
+          // c[1] * S + (c[0] - c[1]) * Sf = c[1] * S * b / c[1]
+          //
+          // Sf = (c[1] * S * b / c[1] - c[1] * S) / (c[0] - c[1]) -- (5)
+          //
+          // To make the storage cost equal to or under the budget,
+          // Sf <= (c[1] * S * b / c[1] - c[1] * S) / (c[0] - c[1]) -- (6)
+          uint64_t total_sst_size_in_fast_max = (c1 * total_sst_size * b / c1 - c1 * total_sst_size) / (c0 - c1);
 
-        //
+          bool met_cost_slo = true;
 
+          // TODO: Group SSTables into fast and slow storage; Assign SSTables that go to the fast storage.
+          //   First, put young, currently in fast storage SSTables to the list.
+          //   Second, put hot temperature SSTables.
+          //     While skipping young, currently in slow storage SSTables.
+          set<uint64_t> ssts_in_fast;
+          uint64_t cur_sst_size_in_fast = 0;
+          for (auto i: _sstMap) {
+            uint64_t sst_id = i.first;
+            SstTemp* st = i.second;
+            uint64_t sst_size = st->Size();
+            if ((st->Age(cur_time) < YOUNG_SST_AGE_CUTOFF) && (st->PathId() == 0)) {
+              ssts_in_fast.insert(sst_id);
+              cur_sst_size_in_fast += sst_size;
+              if (total_sst_size_in_fast_max < cur_sst_size_in_fast) {
+                // You still want to keep them in the fast storage, even if it violates the cost SLO.
+                met_cost_slo = false;
+              }
+            }
+          }
 
-
-
-
-
+          // Add hot SSTables to ssts_in_fast
 
           // TODO
-          //double temp = st->Temp(cur_time);
+          // You can't just use map<sst_temperature, sst_id>. multimap will help.
+          //struct TempSstid{
+          //  double temp;
+          //  uint64_t sstid;
+          //};
 
+          multimap<double, uint64_t> temp_sstid;
+          for (auto i: _sstMap) {
+            uint64_t sst_id = i.first;
+            SstTemp* st = i.second;
+            double t = st->Temp(cur_time);
+            temp_sstid.emplace(t, sst_id);
+          }
+
+          // TODO: How do you iterate multimap?
+
+
+
+
+
+
+          JSONWriter jwriter;
+          EventHelpers::AppendCurrentTime(&jwriter);
+          jwriter << "mutant_sst_org";
+          jwriter.StartObject();
+          jwriter << "total_sst_size" << total_sst_size;
+          jwriter << "total_sst_size_in_fast_max" << total_sst_size_in_fast_max;
+          jwriter << "met_cost_slo" << met_cost_slo;
+          jwriter.EndObject();
+          jwriter.EndObject();
+          _logger->Log(jwriter);
+        }
+
+
+//            // No more room for another SSTable.
+//            if (total_sst_size_in_fast_max < cur_sst_size_in_fast + sst_size)
+//              break;
 
 
         // TODO: Sort the SSTables by their temperatures
+        //
+        // TODO: The not migrate too young SSTables rule
+        //   What problem does it solve?
+        //     Frequent back-and-forth SSTable migrations.
+        //     Young, mostly L0 SSTables that are soon to be compacted away.
+        //
+        //   When an SSTable is too young, such as younger than 30 secs,
+        //     if the current path_id == 0, keep it in the fast storage
+        //       Put it in the fast storage SSTable list before any SSTables
+        //     if the current path_id == 1, keep it in the slow storage
+        //       Do not put it in the fast storage SSTable list.
+        //
+        // TODO: How do you compare the logic with hysterisis?
+        //
 
-        // TODO: Group SSTables into fast and slow storage
 
+        // TODO: Don't migrate just flushed SSTables. They are likely to get compacted away soon.
+        //   The not touch too young SSTables rule covers this as well.
+        //     Is the Temperature defined for too young SSTables?
 
         // TODO: How do you implement hysterisis?
-        //   By not migrating an SSTable when it's too young. Like for the next 30 seconds.
-        //     It will have a negative effect on how well you enforce the cost SLO.
-        //
-        //   What else?
+        //   Not touch too young SSTables
+        //     Like for the first 30 seconds.
+        //     The cost SLO will still be enforced without a problem.
+        //   Not sure if the ignore SSTables in the boundary temperatature range, which was the first thought, can be a solution.
 
         // TODO: Implementing _options.organize_L0_sstables
         //   You can assign them to the fast storage before any SSTables. Sounds good.
