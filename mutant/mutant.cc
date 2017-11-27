@@ -2,6 +2,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/format.hpp>
+#include <boost/range/adaptor/transformed.hpp>
 
 #include "db/db_impl.h"
 #include "db/event_helpers.h"
@@ -985,20 +986,13 @@ void Mutant::_SstMigrationTriggererRun() {
               cur_sst_size_in_fast += sst_size;
               if (total_sst_size_in_fast_max < cur_sst_size_in_fast) {
                 // You still want to keep them in the fast storage, even if it violates the cost SLO.
+                //   This means when an exising database is recovered, the SSTables in the fast storage stay in the fast storage for a while, which is fine.
                 met_cost_slo = false;
               }
             }
           }
 
           // Add hot SSTables to ssts_in_fast
-
-          // TODO
-          // You can't just use map<sst_temperature, sst_id>. multimap will help.
-          //struct TempSstid{
-          //  double temp;
-          //  uint64_t sstid;
-          //};
-
           multimap<double, uint64_t> temp_sstid;
           for (auto i: _sstMap) {
             uint64_t sst_id = i.first;
@@ -1006,13 +1000,25 @@ void Mutant::_SstMigrationTriggererRun() {
             double t = st->Temp(cur_time);
             temp_sstid.emplace(t, sst_id);
           }
-
-          // TODO: How do you iterate multimap?
-
-
-
-
-
+          for (auto i = temp_sstid.rbegin(); i != temp_sstid.rend(); i ++) {
+            uint64_t sst_id = i->second;
+            // Skip if it's already included
+            if (ssts_in_fast.count(sst_id) == 1)
+              continue;
+            // Skip if it's too young and currently in the slow storage
+            if ((_sstMap[sst_id]->Age(cur_time) < YOUNG_SST_AGE_CUTOFF) && (_sstMap[sst_id]->PathId() == 1))
+              continue;
+            // Add to the fast storage when there is space
+            uint64_t sst_size = _sstMap[sst_id]->Size();
+            if (total_sst_size_in_fast_max < cur_sst_size_in_fast + sst_size)
+              break;
+            ssts_in_fast.insert(sst_id);
+            cur_sst_size_in_fast += sst_size;
+          }
+          string ssts_in_fast_str = str(boost::format("(%d %d) %s")
+              % ssts_in_fast.size()
+              % cur_sst_size_in_fast
+              % boost::algorithm::join(ssts_in_fast | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
 
           JSONWriter jwriter;
           EventHelpers::AppendCurrentTime(&jwriter);
@@ -1021,6 +1027,7 @@ void Mutant::_SstMigrationTriggererRun() {
           jwriter << "total_sst_size" << total_sst_size;
           jwriter << "total_sst_size_in_fast_max" << total_sst_size_in_fast_max;
           jwriter << "met_cost_slo" << met_cost_slo;
+          jwriter << "ssts_in_fast" << ssts_in_fast_str;
           jwriter.EndObject();
           jwriter.EndObject();
           _logger->Log(jwriter);
