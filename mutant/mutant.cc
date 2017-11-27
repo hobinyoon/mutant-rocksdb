@@ -923,128 +923,78 @@ void Mutant::_SstMigrationTriggererRun() {
       if (_db->UnscheduledCompactions() > 0)
         continue;
 
-      // Schedule a compaction only when there is an SSTable to be compacted.
-      //   This is an initial, quick check. _PickSstToMigrate() does a full check later.
-      bool may_have_sstable_to_migrate = false;
-
+      // Greedy knapsack solving
       boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+      uint64_t total_sst_size = 0;
+      uint64_t total_sst_size_in_fast_max = 0;
+      set<uint64_t> ssts_in_fast;
+      uint64_t cur_sst_size_in_fast = 0;
+      set<uint64_t> ssts_in_slow;
+      uint64_t cur_sst_size_in_slow = 0;
+      bool met_cost_slo = true;
+      bool have_sstable_to_migrate = false;
 
       {
         lock_guard<mutex> _(_sstMapLock);
 
-        // Greedy knapsack solving
-
-        {
-          // Calc the total size of SSTables that can go to the fast storage.
-          uint64_t total_sst_size = 0;
-          for (auto i: _sstMap) {
-            SstTemp* st = i.second;
-            total_sst_size += st->Size();
-          }
-
-          // The conditions were checked before
-          //   _options.stg_cost_list.size() == 2
-          //   _options.stg_cost_list[1] <= _options.stg_cost_slo <= _options.stg_cost_list[0]
-
-          double c0 = _options.stg_cost_list[0];
-          double c1 = _options.stg_cost_list[1];
-          double b = _options.stg_cost_slo;
-
-          // c[1] : c[1] * S              -- (1) when you put all SSTables in the slow storage
-          // b    : c[1] * Ss + c[0] * Sf -- (2)
-          // c[0] : c[0] * S              --     when you put all SSTables in the fast storage
-          //
-          // S = Sf + Ss -- (3) Total SSTable size in fast and slow storages
-          // Ss = S - Sf
-          //
-          // From (1) and (2),
-          // c[1] * Ss + c[0] * Sf = c[1] * S * b / c[1] -- (4)
-          //
-          // From (3) and (4),
-          // c[1] * S + (c[0] - c[1]) * Sf = c[1] * S * b / c[1]
-          //
-          // Sf = (c[1] * S * b / c[1] - c[1] * S) / (c[0] - c[1]) -- (5)
-          //
-          // To make the storage cost equal to or under the budget,
-          // Sf <= (c[1] * S * b / c[1] - c[1] * S) / (c[0] - c[1]) -- (6)
-          uint64_t total_sst_size_in_fast_max = (c1 * total_sst_size * b / c1 - c1 * total_sst_size) / (c0 - c1);
-
-          bool met_cost_slo = true;
-
-          // TODO: Group SSTables into fast and slow storage; Assign SSTables that go to the fast storage.
-          //   First, put young, currently in fast storage SSTables to the list.
-          //   Second, put hot temperature SSTables.
-          //     While skipping young, currently in slow storage SSTables.
-          set<uint64_t> ssts_in_fast;
-          uint64_t cur_sst_size_in_fast = 0;
-          for (auto i: _sstMap) {
-            uint64_t sst_id = i.first;
-            SstTemp* st = i.second;
-            uint64_t sst_size = st->Size();
-            if ((st->Age(cur_time) < YOUNG_SST_AGE_CUTOFF) && (st->PathId() == 0)) {
-              ssts_in_fast.insert(sst_id);
-              cur_sst_size_in_fast += sst_size;
-              if (total_sst_size_in_fast_max < cur_sst_size_in_fast) {
-                // You still want to keep them in the fast storage, even if it violates the cost SLO.
-                //   This means when an exising database is recovered, the SSTables in the fast storage stay in the fast storage for a while, which is fine.
-                met_cost_slo = false;
-              }
-            }
-          }
-
-          // Add hot SSTables to ssts_in_fast
-          multimap<double, uint64_t> temp_sstid;
-          for (auto i: _sstMap) {
-            uint64_t sst_id = i.first;
-            SstTemp* st = i.second;
-            double t = st->Temp(cur_time);
-            temp_sstid.emplace(t, sst_id);
-          }
-          for (auto i = temp_sstid.rbegin(); i != temp_sstid.rend(); i ++) {
-            uint64_t sst_id = i->second;
-            // Skip if it's already included
-            if (ssts_in_fast.count(sst_id) == 1)
-              continue;
-            // Skip if it's too young and currently in the slow storage
-            if ((_sstMap[sst_id]->Age(cur_time) < YOUNG_SST_AGE_CUTOFF) && (_sstMap[sst_id]->PathId() == 1))
-              continue;
-            // Add to the fast storage when there is space
-            uint64_t sst_size = _sstMap[sst_id]->Size();
-            if (total_sst_size_in_fast_max < cur_sst_size_in_fast + sst_size)
-              break;
-            ssts_in_fast.insert(sst_id);
-            cur_sst_size_in_fast += sst_size;
-          }
-          string ssts_in_fast_str = str(boost::format("(%d %d) %s")
-              % ssts_in_fast.size()
-              % cur_sst_size_in_fast
-              % boost::algorithm::join(ssts_in_fast | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
-
-          JSONWriter jwriter;
-          EventHelpers::AppendCurrentTime(&jwriter);
-          jwriter << "mutant_sst_org";
-          jwriter.StartObject();
-          jwriter << "total_sst_size" << total_sst_size;
-          jwriter << "total_sst_size_in_fast_max" << total_sst_size_in_fast_max;
-          jwriter << "met_cost_slo" << met_cost_slo;
-          jwriter << "ssts_in_fast" << ssts_in_fast_str;
-          jwriter.EndObject();
-          jwriter.EndObject();
-          _logger->Log(jwriter);
+        // Calc the total size of SSTables that can go to the fast storage.
+        for (auto i: _sstMap) {
+          SstTemp* st = i.second;
+          total_sst_size += st->Size();
         }
 
+        // The conditions were checked before
+        //   _options.stg_cost_list.size() == 2
+        //   _options.stg_cost_list[1] <= _options.stg_cost_slo <= _options.stg_cost_list[0]
 
-//            // No more room for another SSTable.
-//            if (total_sst_size_in_fast_max < cur_sst_size_in_fast + sst_size)
-//              break;
+        double c0 = _options.stg_cost_list[0];
+        double c1 = _options.stg_cost_list[1];
+        double b = _options.stg_cost_slo;
 
-
-        // TODO: Sort the SSTables by their temperatures
+        // c[1] : c[1] * S              -- (1) when you put all SSTables in the slow storage
+        // b    : c[1] * Ss + c[0] * Sf -- (2)
+        // c[0] : c[0] * S              --     when you put all SSTables in the fast storage
         //
-        // TODO: The not migrate too young SSTables rule
+        // S = Sf + Ss -- (3) Total SSTable size in fast and slow storages
+        // Ss = S - Sf
+        //
+        // From (1) and (2),
+        // c[1] * Ss + c[0] * Sf = c[1] * S * b / c[1] -- (4)
+        //
+        // From (3) and (4),
+        // c[1] * S + (c[0] - c[1]) * Sf = c[1] * S * b / c[1]
+        //
+        // Sf = (c[1] * S * b / c[1] - c[1] * S) / (c[0] - c[1]) -- (5)
+        //
+        // To make the storage cost equal to or under the budget,
+        // Sf <= (c[1] * S * b / c[1] - c[1] * S) / (c[0] - c[1]) -- (6)
+        total_sst_size_in_fast_max = (c1 * total_sst_size * b / c1 - c1 * total_sst_size) / (c0 - c1);
+
+        // Group SSTables into fast and slow storage; Assign SSTables that go to the fast storage.
+        //   (a) Put L0 SSTables, if _options.organize_L0_sstables = true.
+        //   (b) Put young, currently in fast storage SSTables to the list.
+        //   (c) Keep the SSTables with uninitialized temperature where they are
+        //   (d) Put hot temperature SSTables.
+        //     While skipping young, currently in slow storage SSTables.
+
+        // (a)
+        if (! _options.organize_L0_sstables) {
+          for (auto i: _sstMap) {
+            SstTemp* st = i.second;
+            if (st->Level() == 0) {
+              uint64_t sst_id = i.first;
+              uint64_t sst_size = st->Size();
+              ssts_in_fast.insert(sst_id);
+              cur_sst_size_in_fast += sst_size;
+            }
+          }
+        }
+
+        // (b)
+        // The not migrate too young SSTables rule
         //   What problem does it solve?
         //     Frequent back-and-forth SSTable migrations.
-        //     Young, mostly L0 SSTables that are soon to be compacted away.
+        //     New SSTables from a Memtable flush. They are L0 SSTables that are to be compacted away soon.
         //
         //   When an SSTable is too young, such as younger than 30 secs,
         //     if the current path_id == 0, keep it in the fast storage
@@ -1053,60 +1003,121 @@ void Mutant::_SstMigrationTriggererRun() {
         //       Do not put it in the fast storage SSTable list.
         //
         // TODO: How do you compare the logic with hysterisis?
-        //
+        //   The first thought was ignoring SSTables in the boundary temperatature range from organization.
+        //     You need to define the range, and keep track of how long an SSTable has been in the range.
+        for (auto i: _sstMap) {
+          uint64_t sst_id = i.first;
+          SstTemp* st = i.second;
+          uint64_t sst_size = st->Size();
+          if ((st->Age(cur_time) < YOUNG_SST_AGE_CUTOFF) && (st->PathId() == 0)) {
+            ssts_in_fast.insert(sst_id);
+            cur_sst_size_in_fast += sst_size;
+          }
+        }
 
+        // (c) Keep the SSTables with uninitialized temperature where they are
+        for (auto i: _sstMap) {
+          uint64_t sst_id = i.first;
+          SstTemp* st = i.second;
+          if (st->Temp(cur_time) == TEMP_UNINITIALIZED && (st->PathId() == 0)) {
+            ssts_in_fast.insert(sst_id);
+            cur_sst_size_in_fast += st->Size();
+          }
+        }
 
-        // TODO: Don't migrate just flushed SSTables. They are likely to get compacted away soon.
-        //   The not touch too young SSTables rule covers this as well.
-        //     Is the Temperature defined for too young SSTables?
+        // A cost SLO violation can happen because of the first two conditions.
+        //   When only a small number of SSTables, an SLO can be hard to be met.
+        //     With (a), it becomes harder.
+        //   When there are a lot of young SSTables, which happens when you recover a DB and you don't know when they were actually created,
+        //     a lot of SSTables go to the fast storage, causing a violation.
+        //     This is kind of an implementation flaw. You should be able to know when they were created.
+        //       Couldn't find one from a quick scan of BlockBasedTable.
+        //       You may have to change the SSTable format, or store the information somewhere else.
+        if (total_sst_size_in_fast_max < cur_sst_size_in_fast) {
+          met_cost_slo = false;
+        }
 
-        // TODO: How do you implement hysterisis?
-        //   Not touch too young SSTables
-        //     Like for the first 30 seconds.
-        //     The cost SLO will still be enforced without a problem.
-        //   Not sure if the ignore SSTables in the boundary temperatature range, which was the first thought, can be a solution.
+        // (d) Add hot SSTables to ssts_in_fast
+        multimap<double, uint64_t> temp_sstid;
+        for (auto i: _sstMap) {
+          uint64_t sst_id = i.first;
+          SstTemp* st = i.second;
+          double t = st->Temp(cur_time);
+          temp_sstid.emplace(t, sst_id);
+        }
+        for (auto i = temp_sstid.rbegin(); i != temp_sstid.rend(); i ++) {
+          uint64_t sst_id = i->second;
+          // Skip if it's already included
+          if (ssts_in_fast.count(sst_id) == 1)
+            continue;
 
-        // TODO: Implementing _options.organize_L0_sstables
-        //   You can assign them to the fast storage before any SSTables. Sounds good.
+          // Skip if it's too young and currently in the slow storage
+          SstTemp* st = _sstMap[sst_id];
+          if ((st->Age(cur_time) < YOUNG_SST_AGE_CUTOFF) && (st->PathId() == 1))
+            continue;
 
+          // SSTables with uninitialized temp that are in slow storage should stay there.
+          if (st->Temp(cur_time) == TEMP_UNINITIALIZED && (st->PathId() == 1))
+            continue;
 
-
-
-
-        // You will need hysterisis here. Without it, there can be a lot of back and forth movement near the boundary.
-
-
+          // Add the next hottest SSTable to the fast storage when there is space
+          uint64_t sst_size = st->Size();
+          if (total_sst_size_in_fast_max < cur_sst_size_in_fast + sst_size)
+            break;
+          ssts_in_fast.insert(sst_id);
+          cur_sst_size_in_fast += sst_size;
+        }
 
         for (auto i: _sstMap) {
-          SstTemp* st = i.second;
-          int level = i.second->Level();
-          // We don't consider level -1 (there used to be, not anymore).
-          if (level < 0)
-            continue;
-          if ((!_options.organize_L0_sstables) && level == 0)
-            continue;
+          uint64_t sst_id = i.first;
+          if (ssts_in_fast.count(sst_id) == 0) {
+            ssts_in_slow.insert(sst_id);
+            uint64_t sst_size = i.second->Size();
+            cur_sst_size_in_slow += sst_size;
+          }
+        }
 
-          double temp = st->Temp(cur_time);
-          if (temp == TEMP_UNINITIALIZED)
-            continue;
-
-          // TODO
-          //uint32_t path_id = st->PathId();
-          //if (path_id == 0) {
-          //  if (temp < _sst_ott) {
-          //    may_have_sstable_to_migrate = true;
-          //    break;
-          //  }
-          //} else {
-          //  if (_sst_ott < temp) {
-          //    may_have_sstable_to_migrate = true;
-          //    break;
-          //  }
-          //}
+        // Do you need an SSTable migration?
+        //   Schedule a compaction (migration) only when there is an SSTable that needs to be migrated.
+        //     This is an initial, quick check. _PickSstToMigrate() does a full check later.
+        for (auto i: _sstMap) {
+          uint64_t sst_id = i.first;
+          uint32_t path_id = i.second->PathId();
+          if ((ssts_in_fast.count(sst_id) == 1) && (path_id == 1)) {
+            have_sstable_to_migrate = true;
+            break;
+          }
+          if ((ssts_in_slow.count(sst_id) == 1) && (path_id == 0)) {
+            have_sstable_to_migrate = true;
+            break;
+          }
         }
       }
 
-      if (may_have_sstable_to_migrate)
+      string ssts_in_fast_str = str(boost::format("(%d %d) %s")
+          % ssts_in_fast.size()
+          % cur_sst_size_in_fast
+          % boost::algorithm::join(ssts_in_fast | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
+      string ssts_in_slow_str = str(boost::format("(%d %d) %s")
+          % ssts_in_slow.size()
+          % cur_sst_size_in_slow
+          % boost::algorithm::join(ssts_in_slow | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
+
+      JSONWriter jwriter;
+      EventHelpers::AppendCurrentTime(&jwriter);
+      jwriter << "mutant_sst_org";
+      jwriter.StartObject();
+      jwriter << "total_sst_size" << total_sst_size;
+      jwriter << "total_sst_size_in_fast_max" << total_sst_size_in_fast_max;
+      jwriter << "met_cost_slo" << met_cost_slo;
+      jwriter << "ssts_in_fast" << ssts_in_fast_str;
+      jwriter << "ssts_in_slow" << ssts_in_slow_str;
+      jwriter << "have_sstable_to_migrate" << have_sstable_to_migrate;
+      jwriter.EndObject();
+      jwriter.EndObject();
+      _logger->Log(jwriter);
+
+      if (have_sstable_to_migrate)
         _db->MutantMayScheduleCompaction(_cfd);
     }
   } catch (const exception& e) {
