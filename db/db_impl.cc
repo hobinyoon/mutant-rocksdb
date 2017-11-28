@@ -2293,6 +2293,15 @@ Status DBImpl::CompactFilesImpl(
   c.reset();
 
   bg_compaction_scheduled_--;
+  {
+    // Mutant: TODO
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_trace" << __LINE__;
+    jwriter << "bg_compaction_scheduled_" << bg_compaction_scheduled_;
+    jwriter.EndObject();
+    event_logger_.Log(jwriter);
+  }
   if (bg_compaction_scheduled_ == 0) {
     bg_cv_.SignalAll();
   }
@@ -2915,19 +2924,22 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
     return;
   }
 
-  // Mutant: This is where you schedule compactions. The other place is for
-  // manual compaction.
-  //TRACE << boost::format("%d bg_compaction_scheduled_=%d bg_compactions_allowed=%d unscheduled_compactions_=%d\n")
-  //  % std::this_thread::get_id()
-  //  % bg_compaction_scheduled_ % bg_compactions_allowed % unscheduled_compactions_;
-  while (bg_compaction_scheduled_ < bg_compactions_allowed &&
+  // Mutant: This is where you schedule compactions. The other place is for manual compaction.
+  TRACE << boost::format("%d bg_compaction_scheduled_=%d bg_compactions_allowed=%d unscheduled_compactions_=%d\n")
+    % std::this_thread::get_id()
+    % bg_compaction_scheduled_ % bg_compactions_allowed % unscheduled_compactions_;
+  //while (bg_compaction_scheduled_ < bg_compactions_allowed &&
+  // Mutant: TODO: A hack to get the compaction scheduled. Let's see if it works.
+  while (bg_compaction_scheduled_ <= bg_compactions_allowed &&
          unscheduled_compactions_ > 0) {
     CompactionArg* ca = new CompactionArg;
     ca->db = this;
     ca->m = nullptr;
     bg_compaction_scheduled_++;
     unscheduled_compactions_--;
-    //TRACE << boost::format("%d\n") % std::this_thread::get_id();
+    TRACE << boost::format("%d bg_compaction_scheduled_=%d bg_compactions_allowed=%d unscheduled_compactions_=%d\n")
+      % std::this_thread::get_id()
+      % bg_compaction_scheduled_ % bg_compactions_allowed % unscheduled_compactions_;
     env_->Schedule(&DBImpl::BGWorkCompaction, ca, Env::Priority::LOW, this,
                    &DBImpl::UnscheduleCallback);
   }
@@ -2941,7 +2953,9 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
 void DBImpl::MutantMayScheduleCompaction(ColumnFamilyData* cfd) {
   InstrumentedMutexLock l(&mutex_);
 
-  if (unscheduled_compactions_ > 0)
+  if (0 < bg_compaction_scheduled_)
+    return;
+  if (0 < unscheduled_compactions_)
     return;
 
   AddToCompactionQueue(cfd);
@@ -3227,6 +3241,16 @@ void DBImpl::BackgroundCallFlush() {
 }
 
 void DBImpl::BackgroundCallCompaction(void* arg) {
+  {
+    // Mutant: Debugging the lock
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_trace" << __LINE__;
+    jwriter << "bg_compaction_scheduled_" << bg_compaction_scheduled_;
+    jwriter.EndObject();
+    event_logger_.Log(jwriter);
+  }
+
   bool made_progress = false;
   ManualCompaction* m = reinterpret_cast<ManualCompaction*>(arg);
   JobContext job_context(next_job_id_.fetch_add(1), true);
@@ -3242,8 +3266,10 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
         CaptureCurrentFileNumberInPendingOutputs();
 
     assert(bg_compaction_scheduled_);
+    TRACE << "\n";
     Status s =
         BackgroundCompaction(&made_progress, &job_context, &log_buffer, m);
+    TRACE << "\n";
     TEST_SYNC_POINT("BackgroundCallCompaction:1");
     if (!s.ok() && !s.IsShutdownInProgress()) {
       // Wait a little bit before retrying background compaction in
@@ -3286,11 +3312,23 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
       job_context.Clean();
       mutex_.Lock();
     }
+    TRACE << "\n";
 
     assert(num_running_compactions_ > 0);
     num_running_compactions_--;
     Mutant::SetNumRunningCompactions(num_running_compactions_);
+
     bg_compaction_scheduled_--;
+    {
+      // Mutant: TODO
+      //   Ok, this path is taken.
+      JSONWriter jwriter;
+      EventHelpers::AppendCurrentTime(&jwriter);
+      jwriter << "mutant_trace" << __LINE__;
+      jwriter << "bg_compaction_scheduled_" << bg_compaction_scheduled_;
+      jwriter.EndObject();
+      event_logger_.Log(jwriter);
+    }
 
     versions_->GetColumnFamilySet()->FreeDeadColumnFamilies();
 
@@ -3318,6 +3356,7 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
 Status DBImpl::BackgroundCompaction(bool* made_progress,
                                     JobContext* job_context,
                                     LogBuffer* log_buffer, void* arg) {
+  TRACE << "\n";
   // TRACE << Util::StackTrace(1) << "\n";
   //
   // rocksdb::DBImpl::BackgroundCallCompaction(void*)

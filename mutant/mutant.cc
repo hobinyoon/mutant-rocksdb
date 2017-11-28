@@ -609,6 +609,13 @@ uint32_t Mutant::_CalcOutputPathId(
   //     Use the average of the weighted value of the binary value (hot or cold).
   //     Calculate the threshold when doing the knapsack based SSTable organization. This.
   {
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_trace" << __LINE__;
+    jwriter.EndObject();
+    _logger->Log(jwriter);
+  }
+  {
     lock_guard<mutex> _(_sstOrgLock);
     if (_sst_ott != -1) {
       if (0 < input_sst_temp.size()) {
@@ -620,6 +627,13 @@ uint32_t Mutant::_CalcOutputPathId(
         }
       }
     }
+  }
+  {
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_trace" << __LINE__;
+    jwriter.EndObject();
+    _logger->Log(jwriter);
   }
 
   {
@@ -655,6 +669,13 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   uint64_t sst_id = fmd->fd.GetNumber();
   uint32_t output_path_id = path_id;
 
+  {
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_trace" << __LINE__;
+    jwriter.EndObject();
+    _logger->Log(jwriter);
+  }
   // We reuse _ssts_in_fast and _ssts_in_slow.
   //   They are unlikely to have been modified.
   {
@@ -667,6 +688,13 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
     } else {
       TRACE << boost::format("Interesting: sst_id=%d neither in _ssts_in_fast nor in _ssts_in_slow\n") % sst_id;
     }
+  }
+  {
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_trace" << __LINE__;
+    jwriter.EndObject();
+    _logger->Log(jwriter);
   }
 
   JSONWriter jwriter;
@@ -729,6 +757,13 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
   {
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_trace" << __LINE__;
+    jwriter.EndObject();
+    _logger->Log(jwriter);
+  }
+  {
     lock_guard<mutex> _1(_sstOrgLock);
     _ssts_in_fast.clear();
     _ssts_in_slow.clear();
@@ -777,6 +812,13 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
           return fmd;
       }
     }
+  }
+  {
+    JSONWriter jwriter;
+    EventHelpers::AppendCurrentTime(&jwriter);
+    jwriter << "mutant_trace" << __LINE__;
+    jwriter.EndObject();
+    _logger->Log(jwriter);
   }
 
   return nullptr;
@@ -1114,16 +1156,34 @@ void Mutant::_SstMigrationTriggererRun() {
     while (! _smt_stop_requested) {
       _SstMigrationTriggererSleep();
 
+      {
+        JSONWriter jwriter;
+        EventHelpers::AppendCurrentTime(&jwriter);
+        jwriter << "mutant_trace" << __LINE__;
+        jwriter << "cfd" << _cfd;
+        jwriter << "UnscheduledCompactions" << _db->UnscheduledCompactions();
+        jwriter.EndObject();
+        _logger->Log(jwriter);
+      }
+
       if (!_cfd)
         continue;
 
       // Regular compactions takes priority over temperature-triggered compactions.
-      if (_db->UnscheduledCompactions() > 0)
+      if (0 < _db->UnscheduledCompactions()) {
         continue;
+      }
 
       boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
       bool may_have_sstable_to_migrate = false;
 
+      {
+        JSONWriter jwriter;
+        EventHelpers::AppendCurrentTime(&jwriter);
+        jwriter << "mutant_trace" << __LINE__;
+        jwriter.EndObject();
+        _logger->Log(jwriter);
+      }
       {
         lock_guard<mutex> _1(_sstOrgLock);
         _ssts_in_fast.clear();
@@ -1150,6 +1210,13 @@ void Mutant::_SstMigrationTriggererRun() {
             }
           }
         }
+      }
+      {
+        JSONWriter jwriter;
+        EventHelpers::AppendCurrentTime(&jwriter);
+        jwriter << "mutant_trace" << __LINE__;
+        jwriter.EndObject();
+        _logger->Log(jwriter);
       }
 
       JSONWriter jwriter;
