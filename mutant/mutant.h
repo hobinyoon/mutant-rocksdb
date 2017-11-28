@@ -25,8 +25,6 @@ class MemTable;
 class TableReader;
 
 class SstTemp;
-class SlaAdmin;
-class DiskMon;
 
 // Mutant design
 // -------------
@@ -59,7 +57,7 @@ class Mutant {
   DBImpl* _db = nullptr;
   EventLogger* _logger = nullptr;
   ColumnFamilyData* _cfd = nullptr;
-  DiskMon* _disk_mon = nullptr;
+  //DiskMon* _disk_mon = nullptr;
 
   // This is updated very frequently by threads whenever a SSTable or a
   // MemTable is read, thus we don't used an expensive atomic operation here.
@@ -109,17 +107,25 @@ class Mutant {
 
   bool _initialized = false;
 
-  SlaAdmin* _sla_admin = nullptr;
-  double _target_lat = -1.0;
-  std::mutex _lat_hist_lock;
-  std::deque<double> _lat_hist;
-  std::mutex _slow_dev_r_iops_hist_lock;
-  std::deque<double> _slow_dev_r_iops_hist;
+  //SlaAdmin* _sla_admin = nullptr;
+  //double _target_lat = -1.0;
+  //std::mutex _lat_hist_lock;
+  //std::deque<double> _lat_hist;
+  //std::mutex _slow_dev_r_iops_hist_lock;
+  //std::deque<double> _slow_dev_r_iops_hist;
 
   std::mutex _last_sst_write_time_lock;
   boost::posix_time::ptime _last_sst_write_time;
   int _num_running_compactions = 1000;
   int _num_running_flushes = 1000;
+
+  // Greedy knapsack based SSTable organization
+  std::mutex _sstOrgLock;
+  // SSTable IDs that need to go to the fast storage or slow storage.
+  std::set<uint64_t> _ssts_in_fast;
+  std::set<uint64_t> _ssts_in_slow;
+  // The threshold in between the fast SSTables and slow SSTables after an organization. -1 when undefined.
+  double _sst_ott = -1;
 
   static Mutant& _GetInst();
 
@@ -132,13 +138,18 @@ class Mutant {
   void _SetUpdated();
   double _SstTemperature(uint64_t sst_id, const boost::posix_time::ptime& cur_time);
   int _SstLevel(uint64_t sst_id);
+  double _SstTemp(uint64_t sst_id);
 
   uint32_t _CalcOutputPathId(
       bool temperature_triggered_single_sstable_compaction,
       const std::vector<FileMetaData*>& file_metadata,
       int output_level);
   uint32_t _CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
+
+  FileMetaData* __GetSstFileMetaDataForMigration(const uint64_t sst_id, int& level_for_migration);
   FileMetaData*_PickSstToMigrate(int& level_for_migration);
+
+  void __SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bool log);
 
   void _TempUpdaterRun();
   void _TempUpdaterSleep();
@@ -148,10 +159,10 @@ class Mutant {
   void _SstMigrationTriggererSleep();
   void _SstMigrationTriggererWakeup();
 
-  void _SlaAdminInit(double target_lat, double p, double i, double d);
-  void _SlaAdminAdjust(double lat);
-  void _AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter);
-  void _LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter* jwriter);
+  //void _SlaAdminInit(double target_lat, double p, double i, double d);
+  //void _SlaAdminAdjust(double lat);
+  //void _AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter);
+  //void _LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter* jwriter);
 
   void _SetNumRunningCompactions(int n);
   void _SetNumRunningFlushes(int n);
@@ -181,12 +192,12 @@ public:
 
   static FileMetaData* PickSstToMigrate(int& level_for_migration);
 
-  static void SlaAdminInit(double target_lat, double p, double i, double d);
+  //static void SlaAdminInit(double target_lat, double p, double i, double d);
 
   // We play with the average read latency. It is a client-observed latency, but can be embedded in the DB as well.
   //   An advantage of the client-observed one is that the DB doesn't need to know the specifics of the storage such as cost.
   //     It can be configured from outside.
-  static void SlaAdminAdjust(double lat);
+  //static void SlaAdminAdjust(double lat);
 
   static void SetNumRunningCompactions(int n);
   static void SetNumRunningFlushes(int n);
