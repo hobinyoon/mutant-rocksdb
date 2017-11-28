@@ -507,15 +507,18 @@ void CompactionJob::GenSubcompactionBoundaries() {
 }
 
 Status CompactionJob::Run() {
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   AutoThreadOperationStageUpdater stage_updater(
       ThreadStatus::STAGE_COMPACTION_RUN);
   TEST_SYNC_POINT("CompactionJob::Run():Start");
   log_buffer_->FlushBufferToLog();
   LogCompaction();
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   const size_t num_threads = compact_->sub_compact_states.size();
   assert(num_threads > 0);
   const uint64_t start_micros = env_->NowMicros();
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // Launch a thread for each of subcompactions 1...num_threads-1
   std::vector<std::thread> thread_pool;
@@ -524,6 +527,7 @@ Status CompactionJob::Run() {
     thread_pool.emplace_back(&CompactionJob::ProcessKeyValueCompaction, this,
                              &compact_->sub_compact_states[i]);
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // Mutant: tracing where the path_id was set
   //for (const auto& i: compact_->sub_compact_states) {
@@ -533,18 +537,22 @@ Status CompactionJob::Run() {
   // Always schedule the first subcompaction (whether or not there are also
   // others) in the current thread to be efficient with resources
   ProcessKeyValueCompaction(&compact_->sub_compact_states[0]);
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // Wait for all other threads (if there are any) to finish execution
   for (auto& thread : thread_pool) {
     thread.join();
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   if (output_directory_ && !db_options_.disableDataSync) {
     output_directory_->Fsync();
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   compaction_stats_.micros = env_->NowMicros() - start_micros;
   MeasureTime(stats_, COMPACTION_TIME, compaction_stats_.micros);
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // Check if any thread encountered an error during execution
   Status status;
@@ -554,6 +562,7 @@ Status CompactionJob::Run() {
       break;
     }
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   TablePropertiesCollection tp;
   for (const auto& state : compact_->sub_compact_states) {
@@ -563,7 +572,9 @@ Status CompactionJob::Run() {
       tp[fn] = output.table_properties;
     }
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   compact_->compaction->SetOutputTableProperties(std::move(tp));
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // Finish up all book-keeping to unify the subcompaction results
   AggregateStatistics();
@@ -573,6 +584,7 @@ Status CompactionJob::Run() {
   TEST_SYNC_POINT("CompactionJob::Run():End");
 
   compact_->status = status;
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   return status;
 }
 
@@ -655,10 +667,11 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       versions_->MakeInputIterator(sub_compact->compaction));
 
   // Mutant
-  //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % sub_compact->compaction->output_path_id();
+  TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % sub_compact->compaction->output_path_id();
 
   AutoThreadOperationStageUpdater stage_updater(
       ThreadStatus::STAGE_COMPACTION_PROCESS_KV);
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // I/O measurement variables
   PerfLevel prev_perf_level = PerfLevel::kEnableTime;
@@ -679,6 +692,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   ColumnFamilyData* cfd = sub_compact->compaction->column_family_data();
   const MutableCFOptions* mutable_cf_options =
       sub_compact->compaction->mutable_cf_options();
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // To build compression dictionary, we sample the first output file, assuming
   // it'll reach the maximum length, and then use the dictionary for compressing
@@ -701,6 +715,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       }
     }
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   auto compaction_filter = cfd->ioptions()->compaction_filter;
   std::unique_ptr<CompactionFilter> compaction_filter_from_factory = nullptr;
@@ -718,6 +733,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       compact_->compaction->level(), db_options_.statistics.get());
 
   TEST_SYNC_POINT("CompactionJob::Run():Inprogress");
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   Slice* start = sub_compact->start;
   Slice* end = sub_compact->end;
@@ -728,6 +744,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   } else {
     input->SeekToFirst();
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   Status status;
   sub_compact->c_iter.reset(new CompactionIterator(
@@ -743,6 +760,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   size_t data_begin_offset = 0;
   std::string compression_dict;
   compression_dict.reserve(cfd->ioptions()->compression_opts.max_dict_bytes);
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // TODO(noetzli): check whether we could check !shutting_down_->... only
   // only occasionally (see diff D42687)
@@ -852,6 +870,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     }
     c_iter->Next();
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   sub_compact->num_input_records = c_iter_stats.num_input_records;
   sub_compact->compaction_job_stats.num_input_deletion_records =
@@ -867,6 +886,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
              c_iter_stats.total_filter_time);
   RecordDroppedKeys(c_iter_stats, &sub_compact->compaction_job_stats);
   RecordCompactionIOStats();
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   if (status.ok() &&
       (shutting_down_->load(std::memory_order_acquire) || cfd->IsDropped())) {
@@ -893,6 +913,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       SetPerfLevel(prev_perf_level);
     }
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   sub_compact->c_iter.reset();
   input.reset();

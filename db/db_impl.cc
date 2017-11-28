@@ -2928,9 +2928,7 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
   TRACE << boost::format("%d bg_compaction_scheduled_=%d bg_compactions_allowed=%d unscheduled_compactions_=%d\n")
     % std::this_thread::get_id()
     % bg_compaction_scheduled_ % bg_compactions_allowed % unscheduled_compactions_;
-  //while (bg_compaction_scheduled_ < bg_compactions_allowed &&
-  // Mutant: TODO: A hack to get the compaction scheduled. Let's see if it works.
-  while (bg_compaction_scheduled_ <= bg_compactions_allowed &&
+  while (bg_compaction_scheduled_ < bg_compactions_allowed &&
          unscheduled_compactions_ > 0) {
     CompactionArg* ca = new CompactionArg;
     ca->db = this;
@@ -3266,10 +3264,10 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
         CaptureCurrentFileNumberInPendingOutputs();
 
     assert(bg_compaction_scheduled_);
-    TRACE << "\n";
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     Status s =
         BackgroundCompaction(&made_progress, &job_context, &log_buffer, m);
-    TRACE << "\n";
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     TEST_SYNC_POINT("BackgroundCallCompaction:1");
     if (!s.ok() && !s.IsShutdownInProgress()) {
       // Wait a little bit before retrying background compaction in
@@ -3356,7 +3354,7 @@ void DBImpl::BackgroundCallCompaction(void* arg) {
 Status DBImpl::BackgroundCompaction(bool* made_progress,
                                     JobContext* job_context,
                                     LogBuffer* log_buffer, void* arg) {
-  TRACE << "\n";
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   // TRACE << Util::StackTrace(1) << "\n";
   //
   // rocksdb::DBImpl::BackgroundCallCompaction(void*)
@@ -3392,6 +3390,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
     }
     return status;
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   if (is_manual) {
     // another thread cannot pick up the same work
@@ -3460,6 +3459,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       // Mutant: path_id is set inside PickCompaction()
       //TRACE << boost::format("%d\n") % std::this_thread::get_id();
       c.reset(cfd->PickCompaction(*mutable_cf_options, log_buffer));
+      TRACE << boost::format("%d\n") % std::this_thread::get_id();
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():AfterPickCompaction");
       if (c != nullptr) {
         // update statistics
@@ -3487,6 +3487,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
     }
   }
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   //if (c != nullptr) {
   //  // Mutant: Tracing path_id
   //  TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % c->output_path_id();
@@ -3495,11 +3496,14 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
   if (c != nullptr) {
     running_compactions_.insert(c.get());
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   if (!c) {
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     // Nothing to do
     LogToBuffer(log_buffer, "Compaction nothing to do");
   } else if (c->deletion_compaction()) {
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     // TODO(icanadi) Do we want to honor snapshots here? i.e. not delete old
     // file if there is alive snapshot pointing to it
     assert(c->num_input_files(1) == 0);
@@ -3522,6 +3526,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
                 c->num_input_files(0));
     *made_progress = true;
   } else if (!trivial_move_disallowed && c->IsTrivialMove()) {
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     TEST_SYNC_POINT("DBImpl::BackgroundCompaction:TrivialMove");
     // Instrument for event update
     // TODO(yhchiang): add op details for showing trivial-move.
@@ -3548,8 +3553,8 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
         //
         // Looks like it follows c->input()->fd.GetPathId(). In trivial move,
         // the input and output SSTables are at different levels.
-        //TRACE << boost::format("%d sst_id=%d path_id=%d Trivial move\n")
-        //  % std::this_thread::get_id() % f->fd.GetNumber() % f->fd.GetPathId();
+        TRACE << boost::format("%d sst_id=%d path_id=%d Trivial move\n")
+          % std::this_thread::get_id() % f->fd.GetNumber() % f->fd.GetPathId();
         uint32_t output_path_id = Mutant::CalcOutputPathIdTrivialMove(f);
 
         c->edit()->AddFile(c->output_level(), f->fd.GetNumber(),
@@ -3596,6 +3601,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
     // Clear Instrument
     ThreadStatusUtil::ResetThreadStatus();
   } else {
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     int output_level  __attribute__((unused)) = c->output_level();
     TEST_SYNC_POINT_CALLBACK("DBImpl::BackgroundCompaction:NonTrivial",
                              &output_level);
@@ -3608,7 +3614,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
     // Mutant: This is the only path taken during a normal operation. I wonder
     // when the other path, DBImpl::CompactFilesImpl(), is taken.  For batch
     // repair or something?
-    //TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % c->output_path_id();
+    TRACE << boost::format("%d %d\n") % std::this_thread::get_id() % c->output_path_id();
     CompactionJob compaction_job(
         job_context->job_id, c.get(), db_options_, env_options_,
         versions_.get(), &shutting_down_, log_buffer, directories_.GetDbDir(),
@@ -3618,21 +3624,29 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
         c->mutable_cf_options()->paranoid_file_checks,
         c->mutable_cf_options()->report_bg_io_stats, dbname_,
         &compaction_job_stats);
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     compaction_job.Prepare();
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
     mutex_.Unlock();
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     compaction_job.Run();
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     TEST_SYNC_POINT("DBImpl::BackgroundCompaction:NonTrivial:AfterRun");
     mutex_.Lock();
 
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     status = compaction_job.Install(*c->mutable_cf_options());
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     if (status.ok()) {
       InstallSuperVersionAndScheduleWorkWrapper(
           c->column_family_data(), job_context, *c->mutable_cf_options());
     }
     *made_progress = true;
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   if (c != nullptr) {
+    TRACE << boost::format("%d\n") % std::this_thread::get_id();
     c->ReleaseCompactionFiles(status);
     *made_progress = true;
     NotifyOnCompactionCompleted(
@@ -3643,6 +3657,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
   // this will unref its input_version and column_family_data
   c.reset();
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   if (status.ok()) {
     // Done
   } else if (status.IsShutdownInProgress()) {
@@ -3655,6 +3670,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
     }
   }
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   if (is_manual) {
     ManualCompaction* m = manual_compaction;
     if (!status.ok()) {
