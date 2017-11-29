@@ -841,7 +841,8 @@ void Mutant::_TempUpdaterRun() {
 
               uint32_t path_id = st->PathId();
               double temp = st->Temp(cur_time);
-              string sst_sstr = str(boost::format("%.3f:%d:%d:%d") % temp % sst_id % st->Level() % c);
+              double age = st->Age(cur_time);
+              string sst_sstr = str(boost::format("%.3f:%d:L%d:A%d:%d") % temp % sst_id % st->Level() % age % c);
 
               auto it = pathid_temp_sststr.find(path_id);
               if (it == pathid_temp_sststr.end()) {
@@ -1108,14 +1109,16 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
   }
 
   if (log) {
-    string ssts_in_fast_str = str(boost::format("(%d %d) %s")
-        % _ssts_in_fast.size()
-        % cur_sst_size_in_fast
-        % boost::algorithm::join(_ssts_in_fast | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
-    string ssts_in_slow_str = str(boost::format("(%d %d) %s")
-        % _ssts_in_slow.size()
-        % cur_sst_size_in_slow
-        % boost::algorithm::join(_ssts_in_slow | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
+    //string ssts_in_fast_str = str(boost::format("(%d %d) %s")
+    //    % _ssts_in_fast.size()
+    //    % cur_sst_size_in_fast
+    //    % boost::algorithm::join(_ssts_in_fast | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
+    //string ssts_in_slow_str = str(boost::format("(%d %d) %s")
+    //    % _ssts_in_slow.size()
+    //    % cur_sst_size_in_slow
+    //    % boost::algorithm::join(_ssts_in_slow | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
+    string ssts_in_fast_str = str(boost::format("%d %d") % _ssts_in_fast.size() % cur_sst_size_in_fast);
+    string ssts_in_slow_str = str(boost::format("%d %d") % _ssts_in_slow.size() % cur_sst_size_in_slow);
 
     JSONWriter jwriter;
     EventHelpers::AppendCurrentTime(&jwriter);
