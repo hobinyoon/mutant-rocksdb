@@ -1063,7 +1063,6 @@ Compaction* LevelCompactionPicker::PickCompaction(
   // 2017/01/08-23:05:48.070539 7fd970f45700 (Original Log Time 2017/01/08-23:05:48.070517) [default] Mutant AAA
   uint32_t output_path_id = Mutant::CalcOutputPathId(
       temperature_triggered_single_sstable_compaction, inputs.files, output_level);
-  TRACE << boost::format("%d output_path_id=%d output_level=%d\n") % std::this_thread::get_id() % output_path_id % output_level;
 
   auto c = new Compaction(
       vstorage, mutable_cf_options, std::move(compaction_inputs), output_level,
@@ -1075,25 +1074,21 @@ Compaction* LevelCompactionPicker::PickCompaction(
                          vstorage->base_level()),
       std::move(grandparents), is_manual, score,
       false /* deletion_compaction */, compaction_reason);
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // If it's level 0 compaction, make sure we don't execute any other level 0
   // compactions in parallel
   if (level == 0) {
     level0_compactions_in_progress_.insert(c);
   }
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // Creating a compaction influences the compaction score because the score
   // takes running compactions into account (by skipping files that are already
   // being compacted). Since we just changed compaction score, we recalculate it
   // here
   vstorage->ComputeCompactionScore(mutable_cf_options);
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   TEST_SYNC_POINT_CALLBACK("LevelCompactionPicker::PickCompaction:Return", c);
 
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   return c;
 }
 

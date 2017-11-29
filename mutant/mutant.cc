@@ -608,7 +608,6 @@ uint32_t Mutant::_CalcOutputPathId(
   //   Options:
   //     Use the average of the weighted value of the binary value (hot or cold).
   //     Calculate the threshold when doing the knapsack based SSTable organization. This.
-  TRACE << "\n";
   {
     lock_guard<mutex> _(_sstOrgLock);
     if (_sst_ott != -1) {
@@ -622,7 +621,6 @@ uint32_t Mutant::_CalcOutputPathId(
       }
     }
   }
-  TRACE << "\n";
 
   {
     JSONWriter jwriter;
@@ -638,7 +636,6 @@ uint32_t Mutant::_CalcOutputPathId(
     _logger->Log(jwriter);
   }
 
-  TRACE << boost::format("output_path_id=%d\n") % output_path_id;
   return output_path_id;
 }
 
@@ -658,7 +655,6 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   uint64_t sst_id = fmd->fd.GetNumber();
   uint32_t output_path_id = path_id;
 
-  TRACE << "\n";
   // We reuse _ssts_in_fast and _ssts_in_slow.
   //   They are unlikely to have been modified.
   {
@@ -672,7 +668,6 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
       TRACE << boost::format("Interesting: sst_id=%d neither in _ssts_in_fast nor in _ssts_in_slow\n") % sst_id;
     }
   }
-  TRACE << "\n";
 
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
@@ -733,7 +728,6 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
-  TRACE << "\n";
   {
     lock_guard<mutex> _1(_sstOrgLock);
     _ssts_in_fast.clear();
@@ -760,10 +754,8 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
       for (auto i = temp_sstid.rbegin(); i != temp_sstid.rend(); i ++) {
         uint64_t sst_id = i->second;
         FileMetaData* fmd = __GetSstFileMetaDataForMigration(sst_id, level_for_migration);
-        if (fmd != nullptr) {
-          TRACE << "\n";
+        if (fmd != nullptr)
           return fmd;
-        }
       }
     }
 
@@ -781,14 +773,11 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
       for (auto i = temp_sstid.begin(); i != temp_sstid.end(); i ++) {
         uint64_t sst_id = i->second;
         FileMetaData* fmd = __GetSstFileMetaDataForMigration(sst_id, level_for_migration);
-        if (fmd != nullptr) {
-          TRACE << "\n";
+        if (fmd != nullptr)
           return fmd;
-        }
       }
     }
   }
-  TRACE << "\n";
 
   return nullptr;
 }
@@ -1125,20 +1114,16 @@ void Mutant::_SstMigrationTriggererRun() {
     while (! _smt_stop_requested) {
       _SstMigrationTriggererSleep();
 
-      TRACE << boost::format("UnscheduledCompactions=%d\n") % _db->UnscheduledCompactions();
-
       if (!_cfd)
         continue;
 
       // Regular compactions takes priority over temperature-triggered compactions.
-      if (0 < _db->UnscheduledCompactions()) {
+      if (0 < _db->UnscheduledCompactions())
         continue;
-      }
 
       boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
       bool may_have_sstable_to_migrate = false;
 
-      TRACE << "\n";
       {
         lock_guard<mutex> _1(_sstOrgLock);
         _ssts_in_fast.clear();
@@ -1166,7 +1151,6 @@ void Mutant::_SstMigrationTriggererRun() {
           }
         }
       }
-      TRACE << "\n";
 
       JSONWriter jwriter;
       EventHelpers::AppendCurrentTime(&jwriter);
