@@ -814,8 +814,10 @@ void Mutant::_TempUpdaterRun() {
             }
           }
 
-          vector<string> sst_status_str;
+          // map<path_id, multimap<temp, sst_status_str> >
+          map<int, multimap<double, string> > pathid_temp_sststr;
           {
+
             lock_guard<mutex> lk2(_sstMapLock);
             for (auto i: _sstMap) {
               uint64_t sst_id = i.first;
@@ -837,22 +839,48 @@ void Mutant::_TempUpdaterRun() {
               if (0 < c)
                 st->UpdateTemp(c, reads_per_64MB_per_sec, cur_time);
 
-              sst_status_str.push_back(str(boost::format("%d:%d:%d:%.3f:%.3f")
-                    % sst_id % st->Level() % c % reads_per_64MB_per_sec % st->Temp(cur_time)));
+              uint32_t path_id = st->PathId();
+              double temp = st->Temp(cur_time);
+              string sst_sstr = str(boost::format("%.3f:%d:%d:%d") % temp % sst_id % st->Level() % c);
+
+              auto it = pathid_temp_sststr.find(path_id);
+              if (it == pathid_temp_sststr.end()) {
+                pathid_temp_sststr[path_id] = multimap<double, string>();
+                pathid_temp_sststr[path_id].emplace(temp, sst_sstr);
+              } else {
+                it->second.emplace(temp, sst_sstr);
+              }
             }
+          }
+
+          string ssts_in_fast;
+          if (0 < pathid_temp_sststr.count(0)) {
+            vector<string> s;
+            for (auto it = pathid_temp_sststr[0].rbegin(); it != pathid_temp_sststr[0].rend(); it ++) {
+              s.push_back(it->second);
+            }
+            ssts_in_fast = boost::algorithm::join(s, " ");
+          }
+          string ssts_in_slow;
+          if (0 < pathid_temp_sststr.count(1)) {
+            vector<string> s;
+            for (auto it = pathid_temp_sststr[1].rbegin(); it != pathid_temp_sststr[1].rend(); it ++) {
+              s.push_back(it->second);
+            }
+            ssts_in_slow = boost::algorithm::join(s, " ");
           }
 
           // Output to the rocksdb log. The condition is just to reduce
           // memt-only logs. So not all memt stats are reported, which is okay.
-          if (sst_status_str.size() > 0) {
+          if (0 < pathid_temp_sststr.size()) {
             JSONWriter jwriter;
             EventHelpers::AppendCurrentTime(&jwriter);
             jwriter << "mutant_table_acc_cnt";
             jwriter.StartObject();
-            if (memt_stat_str.size() > 0)
+            if (0 < memt_stat_str.size())
               jwriter << "memt" << boost::algorithm::join(memt_stat_str, " ");
-            if (sst_status_str.size() > 0)
-              jwriter << "sst" << boost::algorithm::join(sst_status_str, " ");
+            jwriter << "ssts_in_fast" << ssts_in_fast;
+            jwriter << "ssts_in_slow" << ssts_in_slow;
             jwriter.EndObject();
             jwriter.EndObject();
             _logger->Log(jwriter);
