@@ -453,12 +453,12 @@ void Mutant::_MemtDeleted(MemTable* m) {
 
 
 void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
+  if (! _options.monitor_temp)
+    return;
   if (! _initialized) {
     TRACE << "Interesting...\n";
     return;
   }
-  if (! _options.monitor_temp)
-    return;
 
   lock_guard<mutex> lk(_sstMapLock_OpenedClosed);
 
