@@ -498,7 +498,6 @@ void DBOptions::DumpMutantOptions(Logger* log) const {
   Header(log, "  temp_decay_factor: %f", mutant_options.temp_decay_factor);
 
   Header(log, "  migrate_sstables: %d", mutant_options.migrate_sstables);
-  Header(log, "  organize_L0_sstables: %d", mutant_options.organize_L0_sstables);
 
   Header(log, "  stg_cost_list: %s",
       boost::algorithm::join(mutant_options.stg_cost_list | boost::adaptors::transformed([](double d) { return std::to_string(d); }), " ").c_str());
@@ -890,7 +889,6 @@ DBOptions::MutantOptions::MutantOptions()
   : monitor_temp(false)
     , temp_decay_factor(0.999)
     , migrate_sstables(false)
-    , organize_L0_sstables(false)
     , stg_cost_slo(-1)
     , cache_filter_index_at_all_levels(false)
     , replaying(false)

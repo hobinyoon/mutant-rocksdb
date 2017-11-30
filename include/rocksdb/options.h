@@ -1365,7 +1365,6 @@ struct DBOptions {
 
     // SSTable organization
     bool migrate_sstables;
-    bool organize_L0_sstables;
 
     // In %/GB/month
     // Storage cost list from fastest to slowest

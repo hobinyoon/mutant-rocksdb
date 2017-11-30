@@ -122,8 +122,12 @@ class Mutant {
   // Greedy knapsack based SSTable organization
   std::mutex _sstOrgLock;
   // SSTable IDs that need to go to the fast storage or slow storage.
+  // TODO: revisit these
   std::set<uint64_t> _ssts_in_fast;
   std::set<uint64_t> _ssts_in_slow;
+  std::multimap<double, uint64_t> _temp_sstid_in_fast;
+  std::multimap<double, uint64_t> _temp_sstid_in_slow;
+  // TODO: This can be reimplemented using the above
   // The threshold in between the fast SSTables and slow SSTables after an organization. -1 when undefined.
   double _sst_ott = -1;
 
