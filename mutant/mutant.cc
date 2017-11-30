@@ -575,8 +575,6 @@ uint32_t Mutant::_CalcOutputPathId(
     return 0;
   if (! _options.migrate_sstables)
     return 0;
-  if ((!_options.organize_L0_sstables) && output_level <= 0)
-    return 0;
 
   if (file_metadata.size() == 0)
     THROW("Unexpected");
@@ -590,51 +588,67 @@ uint32_t Mutant::_CalcOutputPathId(
   for (const auto& fmd: file_metadata) {
     uint64_t sst_id = fmd->fd.GetNumber();
     uint32_t path_id = fmd->fd.GetPathId();
-    double temp = _SstTemperature(sst_id, cur_time);
+
+    double temp = TEMP_UNINITIALIZED;
+    long age = -1;
+    int level = -1;
+    uint64_t size = 0;
+    {
+      lock_guard<mutex> _(_sstMapLock);
+      SstTemp* st = _sstMap[sst_id];
+      temp = st->Temp(cur_time);
+      age = st->Age(cur_time);
+      level = st->Level();
+      size = st->Size();
+    }
 
     if (temp != TEMP_UNINITIALIZED)
       input_sst_temp.push_back(temp);
 
     input_sst_path_id.push_back(path_id);
 
-    input_sst_info.push_back(str(boost::format("(sst_id=%d level=%d path_id=%d temp=%.3f)")
-          % sst_id % _SstLevel(sst_id) % path_id % temp));
+    input_sst_info.push_back(str(boost::format("(sst_id=%d temp=%.3f level=%d path_id=%d size=%d age=%d)")
+          % sst_id % temp % level % path_id % size % age));
   }
 
-  // output_path_id starts from the min of input path_ids in case none of the temperatures is defined.
-  uint32_t output_path_id = *std::min_element(input_sst_path_id.begin(), input_sst_path_id.end());
+  uint32_t output_path_id = 0;
+  if ((!_options.organize_L0_sstables) && output_level <= 0) {
+    // Keep it in the fast storage
+    output_path_id = 0;
+  } else {
+    // output_path_id starts from the min of input path_ids in case none of the temperatures is defined.
+    output_path_id = *std::min_element(input_sst_path_id.begin(), input_sst_path_id.end());
 
-  // This is a trickly one. How do you know if the average is hot or cold without sst_ott (organization temperature threshold)?
-  //   Options:
-  //     Use the average of the weighted value of the binary value (hot or cold).
-  //     Calculate the threshold when doing the knapsack based SSTable organization. This.
-  {
-    lock_guard<mutex> _(_sstOrgLock);
-    if (_sst_ott != -1) {
-      if (0 < input_sst_temp.size()) {
-        double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
-        if (_sst_ott < avg) {
-          output_path_id = 0;
-        } else {
-          output_path_id = 1;
+    // This is a trickly one. How do you know if the average is hot or cold without sst_ott (organization temperature threshold)?
+    //   Options:
+    //     Use the average of the weighted value of the binary value (hot or cold).
+    //     Calculate the threshold when doing the knapsack based SSTable organization. This.
+    {
+      lock_guard<mutex> _(_sstOrgLock);
+      if (_sst_ott != -1) {
+        if (0 < input_sst_temp.size()) {
+          double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
+          if (_sst_ott < avg) {
+            output_path_id = 0;
+          } else {
+            output_path_id = 1;
+          }
         }
       }
     }
   }
 
-  {
-    JSONWriter jwriter;
-    EventHelpers::AppendCurrentTime(&jwriter);
-    jwriter << "mutant_tablet_compaction";
-    jwriter.StartObject();
-    jwriter << "temp_triggered_single_sst_compaction" << temperature_triggered_single_sstable_compaction;
-    if (input_sst_info.size() > 0)
-      jwriter << "in_sst" << boost::algorithm::join(input_sst_info, " ");
-    jwriter << "out_sst_path_id" << output_path_id;
-    jwriter.EndObject();
-    jwriter.EndObject();
-    _logger->Log(jwriter);
-  }
+  JSONWriter jwriter;
+  EventHelpers::AppendCurrentTime(&jwriter);
+  jwriter << "mutant_sst_compaction_migration";
+  jwriter.StartObject();
+  if (0 < input_sst_info.size())
+    jwriter << "in_sst" << boost::algorithm::join(input_sst_info, " ");
+  jwriter << "out_sst_path_id" << output_path_id;
+  jwriter << "temp_triggered_single_sst_compaction" << temperature_triggered_single_sstable_compaction;
+  jwriter.EndObject();
+  jwriter.EndObject();
+  _logger->Log(jwriter);
 
   return output_path_id;
 }
