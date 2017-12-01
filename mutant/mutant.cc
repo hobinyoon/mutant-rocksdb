@@ -133,172 +133,6 @@ public:
 };
 
 
-// https://en.wikipedia.org/wiki/PID_controller
-//class SlaAdmin {
-//  double _target_value;
-//  double _p;
-//  // Since the integral term responds to accumulated errors from the past, it can cause the present value to overshoot the setpoint value
-//  double _i;
-//  // Derivative action predicts system behavior and thus improves settling time and stability of the system.
-//  // Derivative action is seldom used in practice though – by one estimate in only 25% of deployed controllers – because of its variable
-//  // impact on system stability in real-world applications.
-//  double _d;
-//
-//  double _prev_error = 0.0;
-//  double _integral = 0.0;
-//
-//  boost::posix_time::ptime _prev_ts;
-//  bool _prev_ts_defined = false;
-//
-//  const DBOptions::MutantOptions& mu_options;
-//  EventLogger* _logger;
-//
-//public:
-//  SlaAdmin(double target_value, double p, double i, double d, const DBOptions::MutantOptions& options_, EventLogger* logger)
-//    : _target_value(target_value), _p(p), _i(i), _d(d), mu_options(options_)
-//  {
-//    if (logger == nullptr)
-//      THROW("Unexpected");
-//    _logger = logger;
-//
-//    {
-//      JSONWriter jwriter;
-//      EventHelpers::AppendCurrentTime(&jwriter);
-//      jwriter << "mutant_sla_admin_init";
-//      jwriter.StartObject();
-//      jwriter << "target_value" << target_value;
-//      jwriter << "p" << _p;
-//      jwriter << "i" << _i;
-//      jwriter << "d" << _d;
-//      jwriter.EndObject();
-//      jwriter.EndObject();
-//      _logger->Log(jwriter);
-//    }
-//  }
-//
-//  virtual ~SlaAdmin() { }
-//
-//  // Calc an adjustment to the controlling value.
-//  //   The output of the PID controller should be an adjustment to the control variable. Not a direct value of the variable.
-//  //     E.g., when there is no error, the sst_ott can be like 10.
-//  double CalcAdj(double cur_value, JSONWriter& jwriter) {
-//    // Prevent suddern peaks lowering sst_ott too fast. We don't need this now.
-//    //if (_target_value * 2.0 < cur_value)
-//    //  cur_value = _target_value * 2.0;
-//
-//    double error = _target_value - cur_value;
-//
-//    boost::posix_time::ptime ts = boost::posix_time::microsec_clock::local_time();
-//
-//    // No integral or derivative term on the first fun
-//    double derivative = 0.0;
-//    double dt = 0.0;
-//    if (_prev_ts_defined) {
-//      dt = (ts - _prev_ts).total_milliseconds() / 1000.0;
-//      // Apply an exponential decay to I
-//      _integral *= pow(mu_options.pid_i_exp_decay_factor, dt);
-//      _integral += (error * dt);
-//      if (dt != 0.0) {
-//        derivative = (error - _prev_error) / dt;
-//      }
-//    }
-//
-//    _prev_error = error;
-//    _prev_ts = ts;
-//    _prev_ts_defined = true;
-//
-//    double adj = _p * error + _i * _integral + _d * derivative;
-//
-//    // Note: enclose this with something like cur_pid_values
-//    jwriter << "dt" << dt;
-//    jwriter << "p" << error;
-//    jwriter << "i" << _integral;
-//    jwriter << "d" << derivative;
-//    jwriter << "adj" << adj;
-//
-//    // Relative adjustment value to _target_value
-//    double adj1 = adj / _target_value;
-//    jwriter << "adj1" << adj1;
-//
-//    return adj1;
-//  }
-//};
-
-
-//class DiskMon {
-//private:
-//  string _fn;
-//  double _prev_ts = -1;
-//  long _prev_read_ios = 0;
-//  long _prev_write_ios = 0;
-//
-//public:
-//  DiskMon(const string& dev) {
-//    _fn = str(boost::format("/sys/block/%s/stat") % dev);
-//  }
-//
-//  // Get read and write iops. -1 when undefined.
-//  void Get(double& r, double& w) {
-//    // https://www.kernel.org/doc/Documentation/block/stat.txt
-//    //
-//    // Name            units         description
-//    // ----            -----         -----------
-//    // read I/Os       requests      number of read I/Os processed
-//    // read merges     requests      number of read I/Os merged with in-queue I/O
-//    // read sectors    sectors       number of sectors read
-//    // read ticks      milliseconds  total wait time for read requests
-//    // write I/Os      requests      number of write I/Os processed
-//    // write merges    requests      number of write I/Os merged with in-queue I/O
-//    // write sectors   sectors       number of sectors written
-//    // write ticks     milliseconds  total wait time for write requests
-//    // in_flight       requests      number of I/Os currently in flight
-//    // io_ticks        milliseconds  total time this block device has been active
-//    // time_in_queue   milliseconds  total wait time for all requests
-//    //
-//    // $ cat /sys/block/xvde/stat
-//    // 144487        0  2303026   233216   428849 11938402 108265496 12622636        0   464196 12855836
-//    string line;
-//    {
-//      ifstream ifs(_fn);
-//      if (! getline(ifs, line))
-//        THROW("Unexpected");
-//    }
-//    boost::trim(line);
-//    static const auto sep = boost::is_any_of(" ");
-//    vector<string> t;
-//    boost::split(t, line, sep, boost::algorithm::token_compress_on);
-//    if (t.size() != 11)
-//      THROW(boost::format("Unexpected. %d [%s]\n") % t.size() % line);
-//    long read_ios = atol(t[0].c_str());
-//    long write_ios = atol(t[4].c_str());
-//
-//    timeval tv;
-//    gettimeofday(&tv, 0);
-//    double ts_now = tv.tv_sec + tv.tv_usec * 0.000001;
-//
-//    if (_prev_ts == -1) {
-//      r = -1;
-//      w = -1;
-//    } else {
-//      long r_delta = read_ios - _prev_read_ios;
-//      long w_delta = write_ios - _prev_write_ios;
-//      double ts_delta = ts_now - _prev_ts;
-//      if (ts_delta == 0.0) {
-//        r = -1;
-//        w = -1;
-//      } else {
-//        r = r_delta / ts_delta;
-//        w = w_delta / ts_delta;
-//      }
-//    }
-//
-//    _prev_ts = ts_now;
-//    _prev_read_ios = read_ios;
-//    _prev_write_ios = write_ios;
-//  }
-//};
-
-
 Mutant& Mutant::_GetInst() {
   // The object instance won't be released since it's static, singleton.
   static Mutant i;
@@ -309,9 +143,6 @@ Mutant& Mutant::_GetInst() {
 Mutant::Mutant()
 {
 }
-
-
-// TODO: remove all sst_ott
 
 
 void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* el) {
@@ -614,10 +445,7 @@ uint32_t Mutant::_CalcOutputPathId(
   // output_path_id starts from the min of input path_ids in case none of the temperatures is defined.
   uint32_t output_path_id = *std::min_element(input_sst_path_id.begin(), input_sst_path_id.end());
 
-  // This is a trickly one. How do you know if the average is hot or cold without sst_ott (organization temperature threshold)?
-  //   Options:
-  //     Use the average of the weighted value of the binary value (hot or cold).
-  //     Calculate the threshold when doing the knapsack based SSTable organization. This.
+  // We use _sst_ott to decide the output path_id.
   {
     lock_guard<mutex> _(_sstOrgLock);
     if (_sst_ott != -1) {
@@ -663,17 +491,17 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   uint64_t sst_id = fmd->fd.GetNumber();
   uint32_t output_path_id = path_id;
 
-  // We reuse _ssts_in_fast and _ssts_in_slow.
+  // We reuse _ssts_must_be_in_fast and _ssts_must_be_in_slow.
   //   They are unlikely to have been modified.
   {
     lock_guard<mutex> _(_sstOrgLock);
 
-    if (_ssts_in_fast.count(sst_id) == 1) {
+    if (_ssts_must_be_in_fast.count(sst_id) == 1) {
       output_path_id = 0;
-    } else if (_ssts_in_slow.count(sst_id) == 1) {
+    } else if (_ssts_must_be_in_slow.count(sst_id) == 1) {
       output_path_id = 1;
     } else {
-      TRACE << boost::format("Interesting: sst_id=%d neither in _ssts_in_fast nor in _ssts_in_slow\n") % sst_id;
+      TRACE << boost::format("Interesting: sst_id=%d neither in _ssts_must_be_in_fast nor in _ssts_must_be_in_slow\n") % sst_id;
     }
   }
 
@@ -720,10 +548,7 @@ FileMetaData* Mutant::__GetSstFileMetaDataForMigration(const uint64_t sst_id, in
 }
 
 
-// Pick an SSTable to migrate.
-//   When moving an SSTable to fast dev, pick the hottest one over sst_ott.
-//   When moving an SSTable to slow dev, pick the coldest one over sst_ott.
-// Returns nullptr when there is no SSTable for migration
+// Pick an SSTable to migrate. Return nullptr when there is no SSTable for migration.
 FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
   if (! _initialized)
     return nullptr;
@@ -734,48 +559,20 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
   if (! _db)
     return nullptr;
 
-  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
-
   {
     lock_guard<mutex> _1(_sstOrgLock);
-    _ssts_in_fast.clear();
-    _ssts_in_slow.clear();
-    _temp_sstid_in_fast.clear();
-    _temp_sstid_in_slow.clear();
-
     lock_guard<mutex> _(_sstMapLock);
-    __SstOrgGreedyKnapsack(cur_time, false);
+    __SstOrgGreedyKnapsack(false);
 
     // Pick an SSTable to migrate
-    //   (a) First, pick a hottest SSTable in the slow storage that needs to go to the fast storage
-    //   (b) If none, pick a coldest SSTable in the fast storage that needs to go to the slow storage
+    //   (a) First, pick the hottest SSTable in the slow storage that needs to go to the fast storage
+    //   (b) If none, pick the coldest SSTable in the fast storage that needs to go to the slow storage
 
     // (a)
-    {
-      // TODO: revisit all _ssts_in_fast and slow to see what can be rewritten using _temp_sstid_in_fast
-
-      // TODO: This can be done inside __SstOrgGreedyKnapsack()
-      for (uint64_t sst_id: _ssts_in_fast) {
-        SstTemp* st = _sstMap[sst_id];
-        if (st->PathId() == 1) {
-          double temp = st->Temp(cur_time);
-          if (temp == TEMP_UNINITIALIZED)
-            continue;
-
-          // TODO: Add more conditions here
-          //   The SSTable shouldn't be too young
-          //
-          // TODO: Do the same below
-
-          _temp_sstid_in_fast.emplace(temp, sst_id);
-        }
-      }
-
-
-
-
-      for (auto i = _temp_sstid_in_fast.rbegin(); i != _temp_sstid_in_fast.rend(); i ++) {
-        uint64_t sst_id = i->second;
+    for (auto i = _ssts_must_be_in_fast_by_temp.rbegin(); i != _ssts_must_be_in_fast_by_temp.rend(); i ++) {
+      uint64_t sst_id = i->second;
+      SstTemp* st = _sstMap[sst_id];
+      if (st->PathId() == 1) {
         FileMetaData* fmd = __GetSstFileMetaDataForMigration(sst_id, level_for_migration);
         if (fmd != nullptr)
           return fmd;
@@ -783,17 +580,10 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
     }
 
     // (b)
-    {
-      for (uint64_t sst_id: _ssts_in_slow) {
-        SstTemp* st = _sstMap[sst_id];
-        if (st->PathId() == 0) {
-          double temp = st->Temp(cur_time);
-          if (temp != TEMP_UNINITIALIZED)
-            _temp_sstid_in_slow.emplace(temp, sst_id);
-        }
-      }
-      for (auto i = _temp_sstid_in_slow.begin(); i != _temp_sstid_in_slow.end(); i ++) {
-        uint64_t sst_id = i->second;
+    for (auto i = _ssts_must_be_in_slow_by_temp.begin(); i != _ssts_must_be_in_slow_by_temp.end(); i ++) {
+      uint64_t sst_id = i->second;
+      SstTemp* st = _sstMap[sst_id];
+      if (st->PathId() == 0) {
         FileMetaData* fmd = __GetSstFileMetaDataForMigration(sst_id, level_for_migration);
         if (fmd != nullptr)
           return fmd;
@@ -970,7 +760,7 @@ void Mutant::_RunTempUpdaterAndWait() {
 
 
 // A greedy knapsack based SSTable organization
-void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bool log) {
+void Mutant::__SstOrgGreedyKnapsack(bool log) {
   // Calc the total size of SSTables that can go to the fast storage.
   uint64_t total_sst_size = 0;
   for (auto i: _sstMap) {
@@ -978,7 +768,7 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
     total_sst_size += st->Size();
   }
 
-  // The conditions were checked before
+  // The conditions were checked in _Init()
   //   _options.stg_cost_list.size() == 2
   //   _options.stg_cost_list[1] <= _options.stg_cost_slo <= _options.stg_cost_list[0]
 
@@ -1005,52 +795,60 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
   // Sf <= (c[1] * S * b / c[1] - c[1] * S) / (c[0] - c[1]) -- (6)
   uint64_t total_sst_size_in_fast_max = (c1 * total_sst_size * b / c1 - c1 * total_sst_size) / (c0 - c1);
 
-  // Classify SSTables into fast and slow storage
-  //   (-) Level-based organization
-  //     L0 SSTables. Optional (when _options.organize_L0_sstables = false).
-  //     This helps when the database size is small.
-  //       The temperature-based organization could migrate some L0 SSTables to the slow device.
-  //       However, the read requests are most-likely be absorbed by the file system cache since there should be enough memory for caching all SSTables.
-  //     I don't think this condition is necessary. Let's drop it.
+  // Classify SSTables into:
+  //   - No action needed: Too young SSTables and SSTables with an uninitialized temperate
+  //   - Must be migrated
+  //   - Not optimal, but won't migrate
   //
-  //   (a) Age-based organization
-  //     The problem it solves:
-  //       The temperature of a young SSTable can be unstable, causing undesirable migrations.
-  //         A cold SSTable can be mistakenly thought of hot with just a couple of hits when it's created.
-  //         A hot SSTable can be thought of cold because there was no hit when it's created.
-  //           This is not very likely to happen, but still could happen.
-  //     Solution:
-  //       Too young, currently-in-fast-storage SSTables stay in the fast storage. sst_in_fast_by_age
-  //       Too young, currently-in-slow-storage SSTables stay in the slow storage. sst_in_slow_by_age
+  // (-) Level-based organization
+  //   L0 SSTables. Optional (when _options.organize_L0_sstables = false).
+  //   This helps when the database size is small.
+  //     The temperature-based organization could migrate some L0 SSTables to the slow device.
+  //     However, the read requests are most-likely be absorbed by the file system cache since there should be enough memory for caching all SSTables.
+  //   I don't think this condition is necessary. Let's drop it.
   //
-  //     The solution can violate the cost SLO when there are not enough SSTables.
-  //       However, the violation is only when the data size is very small.
+  // (a) Age-based organization
+  //   The problem it solves:
+  //     The temperature of a young SSTable can be unstable, causing undesirable migrations.
+  //       A cold SSTable can be mistakenly thought of hot with just a couple of hits when it's created.
+  //       A hot SSTable can be thought of cold because there was no hit when it's created.
+  //         This is not very likely to happen, but still could happen.
+  //   Solution:
+  //     Too young, currently-in-fast-storage SSTables stay in the fast storage. sst_in_fast_by_age
+  //     Too young, currently-in-slow-storage SSTables stay in the slow storage. sst_in_slow_by_age
   //
-  //     This can be alternatively implemented by not defining the SSTable temperature when they are too young.
+  //   The solution can violate the cost SLO when there are not enough SSTables.
+  //     However, the violation is only when the data size is very small.
   //
-  //   (b) Temperature-based organization
-  //     (b.1) SSTables with an uninitialized temp go to either sst_in_fast_temp_uninit or sst_in_slow_temp_uninit
-  //     (b.2)
-  //       While it satisfies the cost SLO
-  //         Currently the hottest SSTable goes to the fast storage
-  //         Put it in sst_in_fast_by_temp
-  //       Put the others in sst_in_slow_by_temp
-  //     (b.3) Calc and keep SSTable organization temperature threshold (_sst_ott) for deciding where the future SSTables should go based on their temperatures
+  //   This can be alternatively implemented by not defining the SSTable temperature when they are too young.
   //
-  //   (c) Hysteresis
-  //     Mark the coldest half-epsilson amount of SSTables in sst_in_fast_by_temp as dont-migrate.
-  //       You can either mark them or move them to sst_in_fast_by_temp_no_migr.
-  //     The same with sst_in_slow_by_temp_no_migr
+  // (b) Temperature-based organization
+  //   (b.1) SSTables with an uninitialized temp go to either sst_in_fast_temp_uninit or sst_in_slow_temp_uninit
+  //   (b.2)
+  //     While it satisfies the cost SLO
+  //       Currently the hottest SSTable goes to the fast storage
+  //       Put it in sst_in_fast_by_temp
+  //     Put the others in sst_in_slow_by_temp
+  //   (b.3) Calc and keep SSTable organization temperature threshold (_sst_ott) for deciding where the future SSTables should go based on their temperatures
+  //     Note that sst_ott can only be defined with the greedy algorithm.
+  //       Not with an optimal solution with the dynamic algorithm, since there may not be a single boundary between hot and cold.
   //
-  // Check if there is any SSTable that needs to be migrated.
-  //   Does an SSTable's current path_id not match with either (a) or (b)?
+  // (c) Hysteresis
+  //   Mark the coldest half-epsilson amount of SSTables in sst_in_fast_by_temp as dont-migrate; and the others as must-migrate.
+  //   Do the same with the SSTables in sst_in_slow_by_temp.
+  //
+  //   The hysteresis is a trade-off of performance (throughput and latency) vs. the number of back-and-forth SSTable migrations.
+  //     In fact, I think the performance implication would be miniscule.
+  //       From what I observed with YCSB D and 0.4, there weren't much difference in the hit counts near the boundary.
+  //     Cost SLO is always met; the hysteresis doesn't affect cost..
 
   // (a)
-  _sst_in_fast_by_age.clear();
-  _sst_in_slow_by_age.clear();
-  uint64_t cur_sst_size_in_fast = 0;
-  uint64_t cur_sst_size_in_slow = 0;
+  set<uint64_t> sst_in_fast_by_age;
+  set<uint64_t> sst_in_slow_by_age;
+  uint64_t sum_sst_sizes_in_fast = 0;
+  uint64_t sum_sst_sizes_in_slow = 0;
   set<uint64_t> ssts_taken;
+  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
   for (auto i: _sstMap) {
     uint64_t sst_id = i.first;
     SstTemp* st = i.second;
@@ -1058,12 +856,12 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
     uint32_t path_id = st->PathId();
     if (st->Age(cur_time) < YOUNG_SST_AGE_CUTOFF) {
       if (path_id == 0) {
-        _sst_in_fast_by_age.insert(sst_id);
-        cur_sst_size_in_fast += size;
+        sst_in_fast_by_age.insert(sst_id);
+        sum_sst_sizes_in_fast += size;
         ssts_taken.insert(sst_id);
       } else if (path_id == 1) {
-        _sst_in_slow_by_age.insert(sst_id);
-        cur_sst_size_in_slow += size;
+        sst_in_slow_by_age.insert(sst_id);
+        sum_sst_sizes_in_slow += size;
         ssts_taken.insert(sst_id);
       } else {
         THROW(boost::format("Unexpected: %d") % path_id);
@@ -1072,6 +870,8 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
   }
 
   // (b.1)
+  set<uint64_t> ssts_in_fast_by_temp_uninit;
+  set<uint64_t> ssts_in_slow_by_temp_uninit;
   for (auto i: _sstMap) {
     uint64_t sst_id = i.first;
     if (ssts_taken.count(sst_id) == 1)
@@ -1080,14 +880,15 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
     SstTemp* st = i.second;
     double temp = st->Temp(cur_time);
     uint32_t path_id = st->PathId();
+    uint64_t size = st->Size();
     if (temp == TEMP_UNINITIALIZED) {
       if (path_id == 0) {
-        _sst_in_fast_by_temp_uninit.insert(sst_id);
-        cur_sst_size_in_fast += size;
+        ssts_in_fast_by_temp_uninit.insert(sst_id);
+        sum_sst_sizes_in_fast += size;
         ssts_taken.insert(sst_id);
       } else if (path_id == 1) {
-        _sst_in_slow_by_temp_uninit.insert(sst_id);
-        cur_sst_size_in_slow += size;
+        ssts_in_slow_by_temp_uninit.insert(sst_id);
+        sum_sst_sizes_in_slow += size;
         ssts_taken.insert(sst_id);
       } else {
         THROW(boost::format("Unexpected: %d") % path_id);
@@ -1100,7 +901,7 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
   //     when there is only a small number of SSTables.
   //     when you recover a DB that wasn't properly organized by a cost SLO.
   bool met_cost_slo = true;
-  if (total_sst_size_in_fast_max < cur_sst_size_in_fast) {
+  if (total_sst_size_in_fast_max < sum_sst_sizes_in_fast) {
     met_cost_slo = false;
   }
 
@@ -1114,31 +915,26 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
     double t = st->Temp(cur_time);
     temp_sstid.emplace(t, sst_id);
   }
-  // TODO
-  //set<uint64_t> _sst_in_fast_by_temp;
-  _sst_in_fast_by_temp.clear();
-  _sst_in_slow_by_temp.clear();
+  multimap<double, uint64_t> ssts_in_fast_by_temp;
+  multimap<double, uint64_t> ssts_in_slow_by_temp;
   double coldest_temp_in_fast = -1;
   double hottest_temp_in_slow = -1;
   for (auto i = temp_sstid.rbegin(); i != temp_sstid.rend(); i ++) {
     double temp = i->first;
     uint64_t sst_id = i->second;
+    SstTemp* st = _sstMap[sst_id];
     uint64_t sst_size = st->Size();
 
     // Add the next hottest SSTable to the fast storage if there is space. If not, add the SSTable to the slow storage.
-    if (cur_sst_size_in_fast + sst_size <= total_sst_size_in_fast_max) {
-      _sst_in_fast_by_temp.insert(sst_id);
-      cur_sst_size_in_fast += sst_size;
+    if (sum_sst_sizes_in_fast + sst_size <= total_sst_size_in_fast_max) {
+      ssts_in_fast_by_temp.emplace(temp, sst_id);
+      sum_sst_sizes_in_fast += sst_size;
       coldest_temp_in_fast = temp;
-      // TODO: needed?
-      ssts_taken.insert(sst_id);
     } else {
-      _sst_in_slow_by_temp.insert(sst_id);
-      cur_sst_size_in_fast += sst_size;
+      ssts_in_slow_by_temp.emplace(temp, sst_id);
+      sum_sst_sizes_in_fast += sst_size;
       if (hottest_temp_in_slow == -1)
         hottest_temp_in_slow = temp;
-      // TODO: needed?
-      ssts_taken.insert(sst_id);
     }
   }
 
@@ -1146,101 +942,66 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
   if (coldest_temp_in_fast == -1) {
     if (hottest_temp_in_slow == -1) {
       // Undefined
-      _stt_ott = -1;
+      _sst_ott = -1;
     } else {
-      _stt_ott = hottest_temp_in_slow;
+      _sst_ott = hottest_temp_in_slow;
     }
   } else {
     if (hottest_temp_in_slow == -1) {
-      _stt_ott = coldest_temp_in_fast;
+      _sst_ott = coldest_temp_in_fast;
     } else {
       _sst_ott = (coldest_temp_in_fast + hottest_temp_in_slow) / 2.0;
     }
   }
 
   // (c)
-  // TODO: continue from here!!!
-
-
-
-
-
-  // TODO: what if any of the sets is empty?
-
-    if (total_sst_size_in_fast_max < cur_sst_size_in_fast + sst_size) {
-      // SSTable organization temperature threshold. This is defined only with the greedy algorithm.
-      //   Not with an optimal solution with the dynamic algorithm, since there may not be a single boundary between hot and cold.
-      double temp_i = i->first;
-      auto ip1 = i;
-      ip1 ++;
-      if (ip1 == temp_sstid.rend()) {
-        _sst_ott = temp_i;
-      } else {
-        double temp_ip1 = ip1->first;
-        _sst_ott = (temp_i + temp_ip1) / 2.0;
-      }
-
-      break;
-    }
-    _ssts_in_fast.insert(sst_id);
-    cur_sst_size_in_fast += sst_size;
-  }
-
-
-
-
-  for (auto i = temp_sstid.rbegin(); i != temp_sstid.rend(); i ++) {
+  uint64_t half_sst_size_in_hysteresis_range = total_sst_size * _options.stg_cost_slo_epsilon / 2.0;
+  set<uint64_t> ssts_in_fast_by_temp_no_migr;
+  set<uint64_t> ssts_in_slow_by_temp_no_migr;
+  _ssts_must_be_in_fast.clear();
+  _ssts_must_be_in_fast_by_temp.clear();
+  uint64_t s = 0;
+  for (auto i = ssts_in_fast_by_temp.begin(); i != ssts_in_fast_by_temp.end(); i ++) {
+    double temp = i->first;
     uint64_t sst_id = i->second;
-    if (ssts_taken.count(sst_id) == 1)
-      continue;
-
-    // Add the next hottest SSTable to the fast storage when there is space
-    uint64_t sst_size = st->Size();
-    if (total_sst_size_in_fast_max < cur_sst_size_in_fast + sst_size) {
-      // SSTable organization temperature threshold. This is defined only with the greedy algorithm.
-      //   Not with an optimal solution with the dynamic algorithm, since there may not be a single boundary between hot and cold.
-      double temp_i = i->first;
-      auto ip1 = i;
-      ip1 ++;
-      if (ip1 == temp_sstid.rend()) {
-        _sst_ott = temp_i;
-      } else {
-        double temp_ip1 = ip1->first;
-        _sst_ott = (temp_i + temp_ip1) / 2.0;
-      }
-
-      break;
+    uint64_t size = _sstMap[sst_id]->Size();
+    if (s + size <= half_sst_size_in_hysteresis_range) {
+      ssts_in_fast_by_temp_no_migr.insert(sst_id);
+      s += size;
+    } else {
+      _ssts_must_be_in_fast.insert(sst_id);
+      _ssts_must_be_in_fast_by_temp.emplace(temp, sst_id);
     }
-    _ssts_in_fast.insert(sst_id);
-    cur_sst_size_in_fast += sst_size;
   }
-
-
-
-
-
-
-
-  for (auto i: _sstMap) {
-    uint64_t sst_id = i.first;
-    if (_ssts_in_fast.count(sst_id) == 0) {
-      _ssts_in_slow.insert(sst_id);
-      uint64_t sst_size = i.second->Size();
-      cur_sst_size_in_slow += sst_size;
+  _ssts_must_be_in_slow.clear();
+  _ssts_must_be_in_slow_by_temp.clear();
+  s = 0;
+  for (auto i = ssts_in_slow_by_temp.rbegin(); i != ssts_in_slow_by_temp.rend(); i ++) {
+    double temp = i->first;
+    uint64_t sst_id = i->second;
+    uint64_t size = _sstMap[sst_id]->Size();
+    if (s + size <= half_sst_size_in_hysteresis_range) {
+      ssts_in_slow_by_temp_no_migr.insert(sst_id);
+      s += size;
+    } else {
+      _ssts_must_be_in_slow.insert(sst_id);
+      _ssts_must_be_in_slow_by_temp.emplace(temp, sst_id);
     }
   }
 
   if (log) {
-    //string ssts_in_fast_str = str(boost::format("(%d %d) %s")
-    //    % _ssts_in_fast.size()
-    //    % cur_sst_size_in_fast
-    //    % boost::algorithm::join(_ssts_in_fast | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
-    //string ssts_in_slow_str = str(boost::format("(%d %d) %s")
-    //    % _ssts_in_slow.size()
-    //    % cur_sst_size_in_slow
-    //    % boost::algorithm::join(_ssts_in_slow | boost::adaptors::transformed([](uint64_t i) { return std::to_string(i); }), " "));
-    string ssts_in_fast_str = str(boost::format("%d %d") % _ssts_in_fast.size() % cur_sst_size_in_fast);
-    string ssts_in_slow_str = str(boost::format("%d %d") % _ssts_in_slow.size() % cur_sst_size_in_slow);
+    size_t ssts_in_fast = sst_in_fast_by_age.size() + ssts_in_fast_by_temp_uninit.size() + ssts_in_fast_by_temp.size();
+    string ssts_in_fast_str = str(boost::format("num=%d size=%d num_too_young=%d num_temp_uninit=%d num_by_temp_must=%d num_by_temp_no_migr=%d")
+        % ssts_in_fast % sum_sst_sizes_in_fast % sst_in_fast_by_age.size() % ssts_in_fast_by_temp_uninit.size()
+        % _ssts_must_be_in_fast.size()
+        % ssts_in_fast_by_temp_no_migr.size()
+        );
+    size_t ssts_in_slow = sst_in_slow_by_age.size() + ssts_in_slow_by_temp_uninit.size() + ssts_in_slow_by_temp.size();
+    string ssts_in_slow_str = str(boost::format("num=%d size=%d num_too_young=%d num_temp_uninit=%d num_by_temp_must=%d num_by_temp_no_migr=%d")
+        % ssts_in_slow % sum_sst_sizes_in_slow % sst_in_slow_by_age.size() % ssts_in_slow_by_temp_uninit.size()
+        % _ssts_must_be_in_slow.size()
+        % ssts_in_slow_by_temp_no_migr.size()
+        );
 
     JSONWriter jwriter;
     EventHelpers::AppendCurrentTime(&jwriter);
@@ -1251,6 +1012,7 @@ void Mutant::__SstOrgGreedyKnapsack(const boost::posix_time::ptime& cur_time, bo
     jwriter << "met_cost_slo" << met_cost_slo;
     jwriter << "ssts_in_fast" << ssts_in_fast_str;
     jwriter << "ssts_in_slow" << ssts_in_slow_str;
+    jwriter << "sst_ott" << _sst_ott;
     jwriter.EndObject();
     jwriter.EndObject();
     _logger->Log(jwriter);
@@ -1274,30 +1036,26 @@ void Mutant::_SstMigrationTriggererRun() {
       if (0 < _db->UnscheduledCompactions())
         continue;
 
-      boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
       bool may_have_sstable_to_migrate = false;
 
       {
         lock_guard<mutex> _1(_sstOrgLock);
-        _ssts_in_fast.clear();
-        _ssts_in_slow.clear();
-
         {
           lock_guard<mutex> _(_sstMapLock);
-          __SstOrgGreedyKnapsack(cur_time, true);
+          __SstOrgGreedyKnapsack(true);
 
-          // Do we perhaps have an SSTable for migration?
+          // Do we perhaps need to migrate an SSTable?
           //   Schedule a compaction (migration) only when there is an SSTable that needs to be migrated.
           //     This is an initial check. _PickSstToMigrate() does another check later,
           //       because it can change between this function (triggerer that schedules a compaction) and LevelCompactionPicker::PickCompaction().
           for (auto i: _sstMap) {
             uint64_t sst_id = i.first;
             uint32_t path_id = i.second->PathId();
-            if ((_ssts_in_fast.count(sst_id) == 1) && (path_id == 1)) {
+            if (path_id == 1 && _ssts_must_be_in_fast.count(sst_id) == 1) {
               may_have_sstable_to_migrate = true;
               break;
             }
-            if ((_ssts_in_slow.count(sst_id) == 1) && (path_id == 0)) {
+            if (path_id == 0 && _ssts_must_be_in_slow.count(sst_id) == 1) {
               may_have_sstable_to_migrate = true;
               break;
             }
@@ -1339,240 +1097,6 @@ void Mutant::_SstMigrationTriggererWakeup() {
 }
 
 
-//void Mutant::_SlaAdminInit(double target_lat, double p, double i, double d) {
-//  static mutex m;
-//  lock_guard<mutex> _(m);
-//  if (_sla_admin == nullptr) {
-//    _sla_admin = new SlaAdmin(target_lat, p, i, d, _options, _logger);
-//    _disk_mon = new DiskMon(_options.slow_dev);
-//  }
-//}
-
-
-//void Mutant::_SlaAdminAdjust(double lat) {
-//  if (_sla_admin == nullptr)
-//    THROW("Unexpected");
-//
-//  bool make_adjustment = true;
-//  double slow_dev_r_iops;
-//  double slow_dev_w_iops;
-//  _disk_mon->Get(slow_dev_r_iops, slow_dev_w_iops);
-//
-//  // TODO: hope we don't need this thanks to the PID controller.
-//  if (false) {
-//    if (_options.sla_admin_type == "latency") {
-//      // No adjustment when the latency spikes by more than 3.0x.
-//      //   Only when there is enough latency data in _lat_hist
-//      //   This is to filter out high latencies that were not filtered out by the above test.
-//      //     The inaccuracy is caused from the sporadic, client-measured adjustments.
-//      //     Better solution would be measuring the latency inside the DB and making sure they were not affected by a compaction or a flush.
-//      //       Still won't be easy to be perfect.
-//      lock_guard<mutex> _(_lat_hist_lock);
-//      if (_options.sla_observed_value_hist_q_size <= _lat_hist.size()) {
-//        double running_avg = std::accumulate(_lat_hist.begin(), _lat_hist.end(), 0.0) / _lat_hist.size();
-//        if (running_avg * 3.0 < lat) {
-//          make_adjustment = false;
-//        }
-//      }
-//    }
-//  }
-//
-//  if (_options.sla_admin_type == "slow_dev_r_iops") {
-//    // Filter out transient high read IOs probably caused by SSTable compactions / migrations.
-//    //   3TB st1 seems to saturate around 550 iops. Anything above that indicates a transient boost.
-//    if (600 < slow_dev_r_iops)
-//      make_adjustment = false;
-//  }
-//
-//  // Log current latency even when sla_admin is not used or no adjustment is needed
-//  JSONWriter jwriter;
-//  EventHelpers::AppendCurrentTime(&jwriter);
-//  jwriter << "mutant_sla_admin_adjust";
-//  jwriter.StartObject();
-//  jwriter << "cur_lat" << lat;
-//  jwriter << "slow_dev_r_iops" << slow_dev_r_iops;
-//  jwriter << "slow_dev_w_iops" << slow_dev_w_iops;
-//
-//  boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
-//  _LogSstStatus(cur_time, &jwriter);
-//
-//  if (make_adjustment) {
-//    // No adjustment when there is a write going on any of the SSTables
-//    lock_guard<mutex> _(_last_sst_write_time_lock);
-//    if (!_last_sst_write_time.is_not_a_date_time()) {
-//      if ((cur_time - _last_sst_write_time).total_milliseconds() < _options.sst_ott_adj_cooldown_ms) {
-//        jwriter << "adj_type" << "cool_down";
-//        make_adjustment = false;
-//      }
-//    }
-//  }
-//
-//  if (_options.sla_admin_type == "none" || !make_adjustment ) {
-//    jwriter << "make_adjustment" << make_adjustment;
-//    jwriter.EndObject();
-//    jwriter.EndObject();
-//    _logger->Log(jwriter);
-//    return;
-//  }
-//
-//  double cur_value = -1;
-//  if (_options.sla_admin_type == "latency") {
-//    cur_value = lat;
-//  } else if (_options.sla_admin_type == "slow_dev_r_iops") {
-//    cur_value = slow_dev_r_iops;
-//  } else {
-//    THROW("Unexpected");
-//  }
-//
-//  _AdjSstOtt(cur_value, cur_time, &jwriter);
-//
-//  jwriter.EndObject();
-//  jwriter.EndObject();
-//  _logger->Log(jwriter);
-//}
-
-
-// Log SSTable status:
-//   Current temperature
-//   The current storage device
-//   Where it should be based on the current sst_ott
-// The number of SSTables in fast and slow devices.
-// The number of SSTables that would be in fast and slow devices based on the current sst_ott.
-//void Mutant::_LogSstStatus(const boost::posix_time::ptime& cur_time, JSONWriter* jwriter) {
-//  int num_ssts_fast = 0;
-//  int num_ssts_slow = 0;
-//  int num_ssts_fast_should_be = 0;
-//  int num_ssts_slow_should_be = 0;
-//  vector<string> sst_status_str;
-//  {
-//    lock_guard<mutex> l_(_sstMapLock);
-//    for (auto i: _sstMap) {
-//      uint64_t sst_id = i.first;
-//      SstTemp* st = i.second;
-//      double temp = st->Temp(cur_time);
-//      uint32_t path_id = st->PathId();
-//
-//      uint32_t path_id_should_be = 0;
-//
-//      if (path_id == 0) {
-//        num_ssts_fast ++;
-//      } else {
-//        num_ssts_slow ++;
-//      }
-//      if (path_id_should_be == 0) {
-//        num_ssts_fast_should_be ++;
-//      } else {
-//        num_ssts_slow_should_be ++;
-//      }
-//      sst_status_str.push_back(str(boost::format("%d:%d:%.3f:%d:%d")
-//            % sst_id % st->Level() % temp % path_id % path_id_should_be));
-//    }
-//  }
-//  (*jwriter) << "sst_status" << boost::algorithm::join(sst_status_str, " ");
-//  (*jwriter) << "num_ssts_in_fast_dev" << num_ssts_fast;
-//  (*jwriter) << "num_ssts_in_slow_dev" << num_ssts_slow;
-//  (*jwriter) << "num_ssts_should_be_in_fast_dev" << num_ssts_fast_should_be;
-//  (*jwriter) << "num_ssts_should_be_in_slow_dev" << num_ssts_slow_should_be;
-//}
-
-
-//void Mutant::_AdjSstOtt(double cur_value, const boost::posix_time::ptime& cur_time, JSONWriter* jwriter) {
-//  // When there isn't enough data, make no adjustment.
-//  bool make_adjustment = false;
-//  if (_options.sla_admin_type == "latency") {
-//    {
-//      lock_guard<mutex> _(_lat_hist_lock);
-//      if (_options.sla_observed_value_hist_q_size <= _lat_hist.size()) {
-//        _lat_hist.pop_front();
-//      }
-//      _lat_hist.push_back(cur_value);
-//      make_adjustment = (_options.sla_observed_value_hist_q_size <= _lat_hist.size());
-//    }
-//  } else if (_options.sla_admin_type == "slow_dev_r_iops") {
-//    {
-//      lock_guard<mutex> _(_slow_dev_r_iops_hist_lock);
-//      if (_options.sla_observed_value_hist_q_size <= _slow_dev_r_iops_hist.size()) {
-//        _slow_dev_r_iops_hist.pop_front();
-//      }
-//      _slow_dev_r_iops_hist.push_back(cur_value);
-//      make_adjustment = (_options.sla_observed_value_hist_q_size <= _slow_dev_r_iops_hist.size());
-//    }
-//  }
-//
-//  (*jwriter) << "make_adjustment" << make_adjustment;
-//  if (!make_adjustment)
-//    return;
-//
-//  //double pid_adj = _sla_admin->CalcAdj(cur_value, *jwriter);
-//  // When 0 < pid_adj, target_value is bigger. should increase slow dev iops. should raise sst_ott.
-//
-//  int sst_ott_adj = 0;
-//  if (pid_adj < _options.error_adj_ranges[0]) {
-//    // target_value < observed_value. should decrease slow dev iops. should lower sst_ott.
-//    sst_ott_adj = -1;
-//  } else if (pid_adj < _options.error_adj_ranges[1]) {
-//    // pid_adj is within the error margin. make no adjustment.
-//    (*jwriter) << "adj_type" << "no_change";
-//    return;
-//  } else {
-//    // observed_value < target_value. should increase slow dev iops. should raise sst_ott.
-//    sst_ott_adj = 1;
-//  }
-//
-//  vector<double> sst_temps;
-//  {
-//    lock_guard<mutex> l_(_sstMapLock);
-//    for (auto i: _sstMap) {
-//      SstTemp* st = i.second;
-//      sst_temps.push_back(st->Temp(cur_time));
-//    }
-//  }
-//  sort(sst_temps.begin(), sst_temps.end());
-//  int s = sst_temps.size();
-//  if (s == 0) {
-//    // No adjustment when there is no SSTable
-//    (*jwriter) << "adj_type" << "no_sstable";
-//    return;
-//  }
-//
-//  // We make organizations by adjusting sst_ott little by little.
-//  //
-//  // Directly sorting SSTables by their temperatures and move one at the boundary may be intuitive, but won't work.
-//  //   Because an SSTable temperature changes over time and some hot SSTables can be in slow dev or some cold SSTables can be in fast dev.
-//
-//  // Find where the current _sst_ott belongs in the sorted SSTable temperatures
-//  int i = 0;
-//  for ( ; i < s; i ++) {
-//    if (_sst_ott < sst_temps[i])
-//      break;
-//  }
-//  // Now (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
-//  if (sst_ott_adj == 1) {
-//    i ++;
-//  } else if (sst_ott_adj == -1) {
-//    i --;
-//  }
-//
-//  double new_sst_ott;
-//  if (i <= 0) {
-//    new_sst_ott = 0.0;
-//    (*jwriter) << "adj_type" << "no_change_lowest";
-//  } else if (s <= i) {
-//    new_sst_ott = sst_temps[s-1] + 1.0;
-//    (*jwriter) << "adj_type" << "no_change_highest";
-//  } else {
-//    if (sst_ott_adj == 1) {
-//      (*jwriter) << "adj_type" << "move_sst_to_slow";
-//    } else if (sst_ott_adj == -1) {
-//      (*jwriter) << "adj_type" << "move_sst_to_fast";
-//    }
-//    // Take the average when (sst_temps[i - 1] <= _sst_ott) and (_sst_ott < sst_temps[i])
-//    new_sst_ott = (sst_temps[i-1] + sst_temps[i]) / 2.0;
-//  }
-//  _sst_ott = new_sst_ott;
-//}
-
-
 void Mutant::_SetNumRunningCompactions(int n) {
   if (! _initialized)
     return;
@@ -1609,16 +1133,6 @@ void Mutant::_Shutdown() {
 
   static mutex m;
   lock_guard<mutex> _(m);
-
-  //if (_sla_admin) {
-  //  delete _sla_admin;
-  //  _sla_admin = nullptr;
-  //}
-
-  //if (_disk_mon) {
-  //  delete _disk_mon;
-  //  _disk_mon = nullptr;
-  //}
 
   _smt_stop_requested = true;
   _SstMigrationTriggererWakeup();
@@ -1756,18 +1270,6 @@ FileMetaData* Mutant::PickSstToMigrate(int& level_for_migration) {
   static Mutant& i = _GetInst();
   return i._PickSstToMigrate(level_for_migration);
 }
-
-
-//void Mutant::SlaAdminInit(double target_lat, double p, double i, double d) {
-//  static Mutant& i_ = _GetInst();
-//  i_._SlaAdminInit(target_lat, p, i, d);
-//}
-
-
-//void Mutant::SlaAdminAdjust(double lat) {
-//  static Mutant& i = _GetInst();
-//  i._SlaAdminAdjust(lat);
-//}
 
 
 void Mutant::SetNumRunningCompactions(int n) {

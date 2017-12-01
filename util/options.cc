@@ -502,6 +502,7 @@ void DBOptions::DumpMutantOptions(Logger* log) const {
   Header(log, "  stg_cost_list: %s",
       boost::algorithm::join(mutant_options.stg_cost_list | boost::adaptors::transformed([](double d) { return std::to_string(d); }), " ").c_str());
   Header(log, "  stg_cost_slo: %f", mutant_options.stg_cost_slo);
+  Header(log, "  stg_cost_slo_epsilon: %f", mutant_options.stg_cost_slo_epsilon);
 
   Header(log, "  cache_filter_index_at_all_levels: %d", mutant_options.cache_filter_index_at_all_levels);
 
@@ -890,6 +891,7 @@ DBOptions::MutantOptions::MutantOptions()
     , temp_decay_factor(0.999)
     , migrate_sstables(false)
     , stg_cost_slo(-1)
+    , stg_cost_slo_epsilon(0)
     , cache_filter_index_at_all_levels(false)
     , replaying(false)
     , simulated_time_dur_sec(0.0)

@@ -1370,6 +1370,7 @@ struct DBOptions {
     // Storage cost list from fastest to slowest
     std::vector<double> stg_cost_list;
     double stg_cost_slo;
+    double stg_cost_slo_epsilon;
 
     // SSTable metadata organization
     bool cache_filter_index_at_all_levels;

@@ -4320,6 +4320,7 @@ void Java_org_rocksdb_Options_setMutantOptionsEncoded(
   options->mutant_options.cache_filter_index_at_all_levels = _GetBool(json_root, "cache_filter_index_at_all_levels");
 
   options->mutant_options.stg_cost_slo = json_root.get("stg_cost_slo", -1).asDouble();
+  options->mutant_options.stg_cost_slo_epsilon = json_root.get("stg_cost_slo_epsilon", 0).asDouble();
 
   options->mutant_options.replaying = json_root.isMember("replaying");
   if (options->mutant_options.replaying) {
