@@ -657,8 +657,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
   // Mutant: Cache those at all levels. I wonder how often these happen.  It
   // can make a good story if you can identify them.
   //
-  // Mutant: TODO: How big are the filter and index blocks?  It was easy to
-  // calculate in Cassandra since they have separate files.
+  // Mutant: How big are the filter and index blocks? It was easy to calculate in Cassandra since they have separate files.
   if (table_options.cache_index_and_filter_blocks) {
     if (prefetch_index_and_filter_in_cache || level == 0) {
       assert(table_options.block_cache != nullptr);
