@@ -400,6 +400,7 @@ uint32_t Mutant::_CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
     const std::vector<FileMetaData*>& file_metadata,
     int output_level) {
+  // Return the first storage device when migration is not wanted.
   if (! _initialized)
     return 0;
   if (! _options.monitor_temp)
@@ -459,6 +460,10 @@ uint32_t Mutant::_CalcOutputPathId(
       }
     }
   }
+
+  // We don't change path_id when not wanted. Useful for measuring the CPU overhead of SSTable organizations.
+  if (! _options.migrate_sstables)
+    output_path_id = 0;
 
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
