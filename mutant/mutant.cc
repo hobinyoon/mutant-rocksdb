@@ -198,8 +198,8 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
     THROW("Unexpcted");
   _temp_updater_thread = new thread(bind(&rocksdb::Mutant::_TempUpdaterRun, this));
 
-  // _smt_thread is needed only with migrate_sstables
-  if (_options.migrate_sstables) {
+  // _smt_thread is needed only with calc_sst_placement
+  if (_options.calc_sst_placement) {
     if (_smt_thread)
       THROW("Unexpcted");
 
@@ -404,7 +404,7 @@ uint32_t Mutant::_CalcOutputPathId(
     return 0;
   if (! _options.monitor_temp)
     return 0;
-  if (! _options.migrate_sstables)
+  if (! _options.calc_sst_placement)
     return 0;
 
   if (file_metadata.size() == 0)

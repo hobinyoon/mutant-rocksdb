@@ -1363,6 +1363,8 @@ struct DBOptions {
 
     double temp_decay_factor;
 
+    bool calc_sst_placement;
+
     // SSTable organization
     bool migrate_sstables;
 

@@ -497,6 +497,7 @@ void DBOptions::DumpMutantOptions(Logger* log) const {
   Header(log, "  monitor_temp: %d", mutant_options.monitor_temp);
   Header(log, "  temp_decay_factor: %f", mutant_options.temp_decay_factor);
 
+  Header(log, "  calc_sst_placement: %d", mutant_options.calc_sst_placement);
   Header(log, "  migrate_sstables: %d", mutant_options.migrate_sstables);
 
   Header(log, "  stg_cost_list: %s",
@@ -889,6 +890,7 @@ ReadOptions::ReadOptions(bool cksum, bool cache)
 DBOptions::MutantOptions::MutantOptions()
   : monitor_temp(false)
     , temp_decay_factor(0.999)
+    , calc_sst_placement(false)
     , migrate_sstables(false)
     , stg_cost_slo(-1)
     , stg_cost_slo_epsilon(0)

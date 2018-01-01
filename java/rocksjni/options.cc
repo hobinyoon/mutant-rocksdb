@@ -4315,7 +4315,10 @@ void Java_org_rocksdb_Options_setMutantOptionsEncoded(
   }
 
   options->mutant_options.monitor_temp = _GetBool(json_root, "monitor_temp");
+  options->mutant_options.calc_sst_placement = _GetBool(json_root, "calc_sst_placement");
   options->mutant_options.migrate_sstables = _GetBool(json_root, "migrate_sstables");
+  if (options->mutant_options.migrate_sstables)
+    options->mutant_options.calc_sst_placement = true;
 
   options->mutant_options.cache_filter_index_at_all_levels = _GetBool(json_root, "cache_filter_index_at_all_levels");
 
