@@ -477,15 +477,16 @@ uint32_t Mutant::_CalcOutputPathId(
 
 
 // Trivial move. db/db_impl.cc:3508
-//   Used for single SSTable migrations
+//   Used for single-SSTable migrations
 uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   uint32_t path_id = fmd->fd.GetPathId();
 
+  // Keep the current path_id when not initialized or migration is not wanted.
   if (! _initialized)
     return path_id;
   if (! _options.monitor_temp)
     return path_id;
-  if (! _options.migrate_sstables)
+  if (! _options.calc_sst_placement)
     return path_id;
 
   uint64_t sst_id = fmd->fd.GetNumber();
@@ -504,6 +505,10 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
       TRACE << boost::format("Interesting: sst_id=%d neither in _ssts_must_be_in_fast nor in _ssts_must_be_in_slow\n") % sst_id;
     }
   }
+
+  // Keep the current path_id when migration is not wanted. Useful for measuring the compuration overhead.
+  if (! _options.migrate_sstables)
+    output_path_id = path_id;
 
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
@@ -554,7 +559,7 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
     return nullptr;
   if (! _options.monitor_temp)
     return nullptr;
-  if (! _options.migrate_sstables)
+  if (! _options.calc_sst_placement)
     return nullptr;
   if (! _db)
     return nullptr;
@@ -574,8 +579,13 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
       SstTemp* st = _sstMap[sst_id];
       if (st->PathId() == 1) {
         FileMetaData* fmd = __GetSstFileMetaDataForMigration(sst_id, level_for_migration);
-        if (fmd != nullptr)
-          return fmd;
+        if (fmd != nullptr) {
+          if (! _options.migrate_sstables) {
+            return nullptr;
+          } else {
+            return fmd;
+          }
+        }
       }
     }
 
@@ -585,8 +595,13 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
       SstTemp* st = _sstMap[sst_id];
       if (st->PathId() == 0) {
         FileMetaData* fmd = __GetSstFileMetaDataForMigration(sst_id, level_for_migration);
-        if (fmd != nullptr)
-          return fmd;
+        if (fmd != nullptr) {
+          if (! _options.migrate_sstables) {
+            return nullptr;
+          } else {
+            return fmd;
+          }
+        }
       }
     }
   }
