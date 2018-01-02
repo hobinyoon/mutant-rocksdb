@@ -3352,7 +3352,6 @@ InternalIterator* VersionSet::MakeInputIterator(const Compaction* c) {
   if (c->ShouldFormSubcompactions()) {
     read_options.total_order_seek = true;
   }
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // Level-0 files have to be merged together.  For other levels,
   // we will make a concatenating iterator per level.
@@ -3362,16 +3361,13 @@ InternalIterator* VersionSet::MakeInputIterator(const Compaction* c) {
                                         : c->num_input_levels());
   // Mutant: A quick fix of the RocksDB bug. list index goes 1 more than the space below.
   space ++;
-  TRACE << boost::format("%d space=%d\n") % std::this_thread::get_id() % space;
   InternalIterator** list = new InternalIterator* [space];
-  TRACE << boost::format("%d list=%p\n") % std::this_thread::get_id() % list;
   size_t num = 0;
   for (size_t which = 0; which < c->num_input_levels(); which++) {
     if (c->input_levels(which)->num_files != 0) {
       if (c->level(which) == 0) {
         const LevelFilesBrief* flevel = c->input_levels(which);
         for (size_t i = 0; i < flevel->num_files; i++) {
-          TRACE << boost::format("%d num=%d\n") % std::this_thread::get_id() % num;
           list[num++] = cfd->table_cache()->NewIterator(
               read_options, env_options_compactions_,
               cfd->internal_comparator(), flevel->files[i].fd, nullptr,
@@ -3390,7 +3386,6 @@ InternalIterator* VersionSet::MakeInputIterator(const Compaction* c) {
                 false /* skip_filters */, (int)which /* level */),
             new LevelFileNumIterator(cfd->internal_comparator(),
                                      c->input_levels(which)));
-        TRACE << boost::format("%d\n") % std::this_thread::get_id();
       }
     }
   }
@@ -3398,9 +3393,8 @@ InternalIterator* VersionSet::MakeInputIterator(const Compaction* c) {
   InternalIterator* result =
       NewMergingIterator(&c->column_family_data()->internal_comparator(), list,
                          static_cast<int>(num));
-  TRACE << boost::format("%d list=%p space=%d num=%d\n") % std::this_thread::get_id() % list % space % num;
+  //TRACE << boost::format("%d list=%p space=%d num=%d\n") % std::this_thread::get_id() % list % space % num;
   delete[] list;
-  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   return result;
 }
 
