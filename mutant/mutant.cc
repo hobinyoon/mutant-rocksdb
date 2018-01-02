@@ -227,6 +227,8 @@ void Mutant::_MemtCreated(ColumnFamilyData* cfd, MemTable* m) {
   if (! _options.monitor_temp)
     return;
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
+
   lock_guard<mutex> lk(_memtSetLock_OpenedClosed);
 
   if (cfd->GetName() != "usertable") {
@@ -262,6 +264,8 @@ void Mutant::_MemtDeleted(MemTable* m) {
   if (! _options.monitor_temp)
     return;
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
+
   lock_guard<mutex> lk(_memtSetLock_OpenedClosed);
 
   //TRACE << boost::format("MemtDeleted %p\n") % m;
@@ -292,6 +296,8 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
     return;
   }
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
+
   lock_guard<mutex> lk(_sstMapLock_OpenedClosed);
 
   uint64_t sst_id = fd->GetNumber();
@@ -317,6 +323,8 @@ void Mutant::_SstClosed(BlockBasedTable* bbt) {
     return;
   if (! _options.monitor_temp)
     return;
+
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   lock_guard<mutex> lk(_sstMapLock_OpenedClosed);
 
@@ -409,6 +417,8 @@ uint32_t Mutant::_CalcOutputPathId(
   if (! _options.calc_sst_placement)
     return 0;
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
+
   if (file_metadata.size() == 0)
     THROW("Unexpected");
 
@@ -443,6 +453,7 @@ uint32_t Mutant::_CalcOutputPathId(
     input_sst_info.push_back(str(boost::format("(sst_id=%d temp=%.3f level=%d path_id=%d size=%d age=%d)")
           % sst_id % temp % level % path_id % size % age));
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // output_path_id starts from the min of input path_ids in case none of the temperatures is defined.
   uint32_t output_path_id = *std::min_element(input_sst_path_id.begin(), input_sst_path_id.end());
@@ -461,6 +472,7 @@ uint32_t Mutant::_CalcOutputPathId(
       }
     }
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // We don't change path_id when not wanted. Useful for measuring the CPU overhead of SSTable organizations.
   if (! _options.migrate_sstables)
@@ -478,6 +490,7 @@ uint32_t Mutant::_CalcOutputPathId(
   jwriter.EndObject();
   _logger->Log(jwriter);
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   return output_path_id;
 }
 
@@ -495,6 +508,8 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   if (! _options.calc_sst_placement)
     return path_id;
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
+
   uint64_t sst_id = fmd->fd.GetNumber();
   uint32_t output_path_id = path_id;
 
@@ -511,6 +526,7 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
       TRACE << boost::format("Interesting: sst_id=%d neither in _ssts_must_be_in_fast nor in _ssts_must_be_in_slow\n") % sst_id;
     }
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 
   // Keep the current path_id when migration is not wanted. Useful for measuring the compuration overhead.
   if (! _options.migrate_sstables)
@@ -529,6 +545,7 @@ uint32_t Mutant::_CalcOutputPathIdTrivialMove(const FileMetaData* fmd) {
   jwriter.EndObject();
   _logger->Log(jwriter);
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   return output_path_id;
 }
 
@@ -570,6 +587,7 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
   if (! _db)
     return nullptr;
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   {
     lock_guard<mutex> _1(_sstOrgLock);
     lock_guard<mutex> _(_sstMapLock);
@@ -586,6 +604,7 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
       if (st->PathId() == 1) {
         FileMetaData* fmd = __GetSstFileMetaDataForMigration(sst_id, level_for_migration);
         if (fmd != nullptr) {
+          TRACE << boost::format("%d\n") % std::this_thread::get_id();
           if (! _options.migrate_sstables) {
             return nullptr;
           } else {
@@ -602,6 +621,7 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
       if (st->PathId() == 0) {
         FileMetaData* fmd = __GetSstFileMetaDataForMigration(sst_id, level_for_migration);
         if (fmd != nullptr) {
+          TRACE << boost::format("%d\n") % std::this_thread::get_id();
           if (! _options.migrate_sstables) {
             return nullptr;
           } else {
@@ -612,6 +632,7 @@ FileMetaData* Mutant::_PickSstToMigrate(int& level_for_migration) {
     }
   }
 
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   return nullptr;
 }
 
@@ -623,6 +644,7 @@ void Mutant::_TempUpdaterRun() {
     while (! _temp_updater_stop_requested) {
       _TempUpdaterSleep();
 
+      TRACE << boost::format("%d\n") % std::this_thread::get_id();
       {
         lock_guard<mutex> lk(_temp_updating_mutex);
 
@@ -727,6 +749,7 @@ void Mutant::_TempUpdaterRun() {
         prev_time = cur_time;
         _temp_updated = true;
       }
+      TRACE << boost::format("%d\n") % std::this_thread::get_id();
       // There can be multiple threads waiting for this. Notify them all.
       _temp_updated_cv.notify_all();
     }
@@ -782,6 +805,8 @@ void Mutant::_RunTempUpdaterAndWait() {
 
 // A greedy knapsack based SSTable organization
 void Mutant::__SstOrgGreedyKnapsack(bool log) {
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
+
   // Calc the total size of SSTables that can go to the fast storage.
   uint64_t total_sst_size = 0;
   for (auto i: _sstMap) {
@@ -891,6 +916,7 @@ void Mutant::__SstOrgGreedyKnapsack(bool log) {
   }
 
   // (b.1)
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   set<uint64_t> ssts_in_fast_by_temp_uninit;
   set<uint64_t> ssts_in_slow_by_temp_uninit;
   for (auto i: _sstMap) {
@@ -927,6 +953,7 @@ void Mutant::__SstOrgGreedyKnapsack(bool log) {
   }
 
   // (b.2)
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   multimap<double, uint64_t> temp_sstid;
   for (auto i: _sstMap) {
     uint64_t sst_id = i.first;
@@ -960,6 +987,7 @@ void Mutant::__SstOrgGreedyKnapsack(bool log) {
   }
 
   // (b.3)
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   if (coldest_temp_in_fast == -1) {
     if (hottest_temp_in_slow == -1) {
       // Undefined
@@ -976,6 +1004,7 @@ void Mutant::__SstOrgGreedyKnapsack(bool log) {
   }
 
   // (c)
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
   uint64_t half_sst_size_in_hysteresis_range = total_sst_size * _options.stg_cost_slo_epsilon / 2.0;
   set<uint64_t> ssts_in_fast_by_temp_no_migr;
   set<uint64_t> ssts_in_slow_by_temp_no_migr;
@@ -1038,6 +1067,7 @@ void Mutant::__SstOrgGreedyKnapsack(bool log) {
     jwriter.EndObject();
     _logger->Log(jwriter);
   }
+  TRACE << boost::format("%d\n") % std::this_thread::get_id();
 }
 
 
@@ -1092,6 +1122,8 @@ void Mutant::_SstMigrationTriggererRun() {
 
       if (may_have_sstable_to_migrate)
         _db->MutantMayScheduleCompaction(_cfd);
+
+      TRACE << boost::format("%d\n") % std::this_thread::get_id();
     }
   } catch (const exception& e) {
     TRACE << boost::format("Exception: %s\n") % e.what();

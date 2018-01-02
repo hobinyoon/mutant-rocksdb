@@ -24,6 +24,7 @@
 #include "util/perf_context_imp.h"
 #include "util/stop_watch.h"
 #include "util/sync_point.h"
+#include "util/util.h"
 
 namespace rocksdb {
 // Without anonymous namespace here, we fail the warning -Wmissing-prototypes
@@ -318,6 +319,7 @@ void MergingIterator::InitMaxHeap() {
 InternalIterator* NewMergingIterator(const Comparator* cmp,
                                      InternalIterator** list, int n,
                                      Arena* arena) {
+  TRACE << boost::format("%d list=%p n=%d\n") % std::this_thread::get_id() % list % n;
   assert(n >= 0);
   if (n == 0) {
     return NewEmptyInternalIterator(arena);
