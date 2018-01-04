@@ -3356,28 +3356,29 @@ InternalIterator* VersionSet::MakeInputIterator(const Compaction* c) {
   // Level-0 files have to be merged together.  For other levels,
   // we will make a concatenating iterator per level.
   // TODO(opt): use concatenating iterator for level-0 if there is no overlap
-  size_t space = (c->level() == 0 ? c->input_levels(0)->num_files +
-                                              c->num_input_levels() - 1
-                                        : c->num_input_levels());
-  // Mutant: A quick fix of the RocksDB bug. list index goes 1 more than the space below.
-  space ++;
-  InternalIterator** list = new InternalIterator* [space];
-  size_t num = 0;
+  //size_t space = (c->level() == 0 ? c->input_levels(0)->num_files +
+  //                                            c->num_input_levels() - 1
+  //                                      : c->num_input_levels());
+  // Mutant: seems like there are cases where space < num, which corrupts the memory and causes an error when delete[]ing it below.
+  //   Use vector<> instead.
+  //InternalIterator** list = new InternalIterator* [space];
+  std::vector<InternalIterator*> iiptrlist;
+
   for (size_t which = 0; which < c->num_input_levels(); which++) {
     if (c->input_levels(which)->num_files != 0) {
       if (c->level(which) == 0) {
         const LevelFilesBrief* flevel = c->input_levels(which);
         for (size_t i = 0; i < flevel->num_files; i++) {
-          list[num++] = cfd->table_cache()->NewIterator(
+          iiptrlist.push_back(cfd->table_cache()->NewIterator(
               read_options, env_options_compactions_,
               cfd->internal_comparator(), flevel->files[i].fd, nullptr,
               nullptr, /* no per level latency histogram*/
               true /* for_compaction */, nullptr /* arena */,
-              false /* skip_filters */, (int)which /* level */);
+              false /* skip_filters */, (int)which /* level */));
         }
       } else {
         // Create concatenating iterator for the files from this level
-        list[num++] = NewTwoLevelIterator(
+        iiptrlist.push_back(NewTwoLevelIterator(
             new LevelFileIteratorState(
                 cfd->table_cache(), read_options, env_options_,
                 cfd->internal_comparator(),
@@ -3385,16 +3386,12 @@ InternalIterator* VersionSet::MakeInputIterator(const Compaction* c) {
                 true /* for_compaction */, false /* prefix enabled */,
                 false /* skip_filters */, (int)which /* level */),
             new LevelFileNumIterator(cfd->internal_comparator(),
-                                     c->input_levels(which)));
+                                     c->input_levels(which))));
       }
     }
   }
-  assert(num <= space);
-  InternalIterator* result =
-      NewMergingIterator(&c->column_family_data()->internal_comparator(), list,
-                         static_cast<int>(num));
-  //TRACE << boost::format("%d list=%p space=%d num=%d\n") % std::this_thread::get_id() % list % space % num;
-  delete[] list;
+  size_t num = iiptrlist.size();
+  InternalIterator* result = NewMergingIterator(&c->column_family_data()->internal_comparator(), &iiptrlist[0], static_cast<int>(num));
   return result;
 }
 
