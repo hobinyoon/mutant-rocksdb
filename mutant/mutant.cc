@@ -423,6 +423,9 @@ uint32_t Mutant::_CalcOutputPathId(
   vector<string> input_sst_info;
 
   for (const auto& fmd: file_metadata) {
+    if (fmd == nullptr)
+      THROW("Interesting");
+
     uint64_t sst_id = fmd->fd.GetNumber();
     uint32_t path_id = fmd->fd.GetPathId();
 
