@@ -145,7 +145,6 @@ class Mutant {
   uint32_t _CalcOutputPathId(
       bool temperature_triggered_single_sstable_compaction,
       const std::vector<FileMetaData*>& file_metadata,
-      const std::vector<FileMetaData*>& file_metadata1,
       int output_level);
   uint32_t _CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
 
@@ -190,7 +189,6 @@ public:
   static uint32_t CalcOutputPathId(
       bool temperature_triggered_single_sstable_compaction,
       const std::vector<FileMetaData*>& file_metadata,
-      const std::vector<FileMetaData*>& file_metadata1,
       int output_level);
   static uint32_t CalcOutputPathIdTrivialMove(const FileMetaData* fmd);
 

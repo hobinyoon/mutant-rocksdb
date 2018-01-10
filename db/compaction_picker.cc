@@ -1062,7 +1062,7 @@ Compaction* LevelCompactionPicker::PickCompaction(
   // LogToBuffer(log_buffer, "[%s] Mutant AAA\n", cf_name.c_str());
   // 2017/01/08-23:05:48.070539 7fd970f45700 (Original Log Time 2017/01/08-23:05:48.070517) [default] Mutant AAA
   uint32_t output_path_id = Mutant::CalcOutputPathId(
-      temperature_triggered_single_sstable_compaction, inputs.files, grandparents, output_level);
+      temperature_triggered_single_sstable_compaction, inputs.files, output_level);
 
   auto c = new Compaction(
       vstorage, mutable_cf_options, std::move(compaction_inputs), output_level,
