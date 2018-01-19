@@ -1035,21 +1035,29 @@ Compaction* LevelCompactionPicker::PickCompaction(
     assert(!inputs.files.empty());
   }
 
-  // Setup input files from output level
-  CompactionInputFiles output_level_inputs;
-  output_level_inputs.level = output_level;
-  if (!SetupOtherInputs(cf_name, mutable_cf_options, vstorage, &inputs,
-                        &output_level_inputs, &parent_index, base_index)) {
-    return nullptr;
-  }
-
+  // When doing a Mutant-triggered, single-table migration, don't include the other SSTables here.
+  //   Used to include the SSTables at the output_level, which was wrong.
+  //     With a temperature-triggered migration, output_level is the same as the input SSTable level.
   std::vector<CompactionInputFiles> compaction_inputs({inputs});
-  if (!output_level_inputs.empty()) {
-    compaction_inputs.push_back(output_level_inputs);
-  }
-
   std::vector<FileMetaData*> grandparents;
-  GetGrandparents(vstorage, inputs, output_level_inputs, &grandparents);
+  if (temperature_triggered_single_sstable_compaction) {
+    // With the temperature triggered single SSTable compaction, we don't include other SSTables.
+    //   This won't lead to a trivial move.
+  } else {
+    // Setup input files from output level
+    CompactionInputFiles output_level_inputs;
+    output_level_inputs.level = output_level;
+    if (!SetupOtherInputs(cf_name, mutable_cf_options, vstorage, &inputs,
+                          &output_level_inputs, &parent_index, base_index)) {
+      return nullptr;
+    }
+
+    if (!output_level_inputs.empty()) {
+      compaction_inputs.push_back(output_level_inputs);
+    }
+
+    GetGrandparents(vstorage, inputs, output_level_inputs, &grandparents);
+  }
 
   // Mutant: Calculate the output SSTable path_id using the average input
   // SSTable temperature.  Mutant overrides the RocksDB default placement,
