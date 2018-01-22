@@ -1012,27 +1012,30 @@ Compaction* LevelCompactionPicker::PickCompaction(
   }
   assert(level >= 0 && output_level >= 0);
 
-  // Two level 0 compaction won't run at the same time, so don't need to worry
-  // about files on level 0 being compacted.
-  if (level == 0) {
-    assert(level0_compactions_in_progress_.empty());
-    InternalKey smallest, largest;
-    GetRange(inputs, &smallest, &largest);
-    // Note that the next call will discard the file we placed in
-    // c->inputs_[0] earlier and replace it with an overlapping set
-    // which will include the picked file.
-    inputs.files.clear();
-    vstorage->GetOverlappingInputs(0, &smallest, &largest, &inputs.files);
+  if (temperature_triggered_single_sstable_compaction) {
+  } else {
+    // Two level 0 compaction won't run at the same time, so don't need to worry
+    // about files on level 0 being compacted.
+    if (level == 0) {
+      assert(level0_compactions_in_progress_.empty());
+      InternalKey smallest, largest;
+      GetRange(inputs, &smallest, &largest);
+      // Note that the next call will discard the file we placed in
+      // c->inputs_[0] earlier and replace it with an overlapping set
+      // which will include the picked file.
+      inputs.files.clear();
+      vstorage->GetOverlappingInputs(0, &smallest, &largest, &inputs.files);
 
-    // If we include more L0 files in the same compaction run it can
-    // cause the 'smallest' and 'largest' key to get extended to a
-    // larger range. So, re-invoke GetRange to get the new key range
-    GetRange(inputs, &smallest, &largest);
-    if (RangeInCompaction(vstorage, &smallest, &largest, output_level,
-                          &parent_index)) {
-      return nullptr;
+      // If we include more L0 files in the same compaction run it can
+      // cause the 'smallest' and 'largest' key to get extended to a
+      // larger range. So, re-invoke GetRange to get the new key range
+      GetRange(inputs, &smallest, &largest);
+      if (RangeInCompaction(vstorage, &smallest, &largest, output_level,
+                            &parent_index)) {
+        return nullptr;
+      }
+      assert(!inputs.files.empty());
     }
-    assert(!inputs.files.empty());
   }
 
   // When doing a Mutant-triggered, single-table migration, don't include the other SSTables here.
