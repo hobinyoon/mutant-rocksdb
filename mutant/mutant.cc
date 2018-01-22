@@ -399,8 +399,7 @@ double Mutant::_SstTemp(uint64_t sst_id) {
 
 uint32_t Mutant::_CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
-    const std::vector<FileMetaData*>& file_metadata,
-    int output_level) {
+    const std::vector<FileMetaData*>& file_metadata) {
   // Return the first storage device when migration is not wanted.
   if (! _initialized)
     return 0;
@@ -414,9 +413,9 @@ uint32_t Mutant::_CalcOutputPathId(
 
   boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
 
-  vector<double> input_sst_temp;
-  vector<double> input_sst_path_id;
-  vector<string> input_sst_info;
+  vector<double> in_sst_temp;
+  vector<double> in_sst_path_id;
+  vector<string> in_sst_info;
 
   for (const auto& fmd: file_metadata) {
     if (fmd == nullptr)
@@ -439,23 +438,24 @@ uint32_t Mutant::_CalcOutputPathId(
     }
 
     if (temp != TEMP_UNINITIALIZED)
-      input_sst_temp.push_back(temp);
+      in_sst_temp.push_back(temp);
 
-    input_sst_path_id.push_back(path_id);
-    input_sst_info.push_back(str(boost::format("(sst_id=%d temp=%.3f level=%d path_id=%d size=%d age=%d)")
+    in_sst_path_id.push_back(path_id);
+    in_sst_info.push_back(str(boost::format("(sst_id=%d temp=%.3f level=%d path_id=%d size=%d age=%d)")
           % sst_id % temp % level % path_id % size % age));
   }
 
   // output_path_id starts from the min of input path_ids in case none of the temperatures is defined.
-  uint32_t output_path_id = *std::min_element(input_sst_path_id.begin(), input_sst_path_id.end());
+  uint32_t output_path_id = *std::min_element(in_sst_path_id.begin(), in_sst_path_id.end());
 
   // We use _sst_ott to decide the output path_id.
+  double sst_ott = _sst_ott;
   {
     lock_guard<mutex> _(_sstOrgLock);
-    if (_sst_ott != -1) {
-      if (0 < input_sst_temp.size()) {
-        double avg = std::accumulate(input_sst_temp.begin(), input_sst_temp.end(), 0.0) / input_sst_temp.size();
-        if (_sst_ott < avg) {
+    if (sst_ott != -1) {
+      if (0 < in_sst_temp.size()) {
+        double avg = std::accumulate(in_sst_temp.begin(), in_sst_temp.end(), 0.0) / in_sst_temp.size();
+        if (sst_ott < avg) {
           output_path_id = 0;
         } else {
           output_path_id = 1;
@@ -470,10 +470,12 @@ uint32_t Mutant::_CalcOutputPathId(
 
   JSONWriter jwriter;
   EventHelpers::AppendCurrentTime(&jwriter);
-  jwriter << "mutant_sst_compaction_migration";
+  jwriter << "mutant_calc_out_sst_path_id";
   jwriter.StartObject();
-  if (0 < input_sst_info.size())
-    jwriter << "in_sst" << boost::algorithm::join(input_sst_info, " ");
+  if (0 < in_sst_info.size())
+    jwriter << "in_sst" << boost::algorithm::join(in_sst_info, " ");
+  jwriter << "in_sst_temp" << boost::algorithm::join(in_sst_temp | boost::adaptors::transformed([](double d) { return std::to_string(d); }), " ");
+  jwriter << "sst_ott" << sst_ott;
   jwriter << "out_sst_path_id" << output_path_id;
   jwriter << "temp_triggered_single_sst_compaction" << temperature_triggered_single_sstable_compaction;
   jwriter.EndObject();
@@ -1275,10 +1277,9 @@ void Mutant::SetUpdated() {
 
 uint32_t Mutant::CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
-    const std::vector<FileMetaData*>& file_metadata,
-    int output_level) {
+    const std::vector<FileMetaData*>& file_metadata) {
   static Mutant& i = _GetInst();
-  return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata, output_level);
+  return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata);
 }
 
 
