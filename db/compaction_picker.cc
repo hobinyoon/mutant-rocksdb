@@ -1075,6 +1075,16 @@ Compaction* LevelCompactionPicker::PickCompaction(
   uint32_t output_path_id = Mutant::CalcOutputPathId(
       temperature_triggered_single_sstable_compaction, inputs.files, output_level);
 
+  if (temperature_triggered_single_sstable_compaction) {
+    // No migration needed when the input and output path_ids are the same.
+    if (inputs.size() != 1)
+      THROW(boost::format("Unexpected: %d") % inputs.size());
+    FileMetaData* fmd = inputs[0];
+    uint32_t in_path_id = fmd->fd.GetPathId();
+    if (in_path_id == output_path_id)
+      return nullptr;
+  }
+
   auto c = new Compaction(
       vstorage, mutable_cf_options, std::move(compaction_inputs), output_level,
       mutable_cf_options.MaxFileSizeForLevel(output_level),
