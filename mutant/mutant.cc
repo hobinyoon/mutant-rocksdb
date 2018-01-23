@@ -399,7 +399,7 @@ double Mutant::_SstTemp(uint64_t sst_id) {
 
 uint32_t Mutant::_CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
-    const std::vector<FileMetaData*>& file_metadata) {
+    const std::vector<const FileMetaData*>& file_metadata) {
   // Return the first storage device when migration is not wanted.
   if (! _initialized)
     return 0;
@@ -419,7 +419,7 @@ uint32_t Mutant::_CalcOutputPathId(
 
   for (const auto& fmd: file_metadata) {
     if (fmd == nullptr)
-      THROW("Interesting");
+      THROW("Unexpected");
 
     uint64_t sst_id = fmd->fd.GetNumber();
     uint32_t path_id = fmd->fd.GetPathId();
@@ -1277,7 +1277,7 @@ void Mutant::SetUpdated() {
 
 uint32_t Mutant::CalcOutputPathId(
     bool temperature_triggered_single_sstable_compaction,
-    const std::vector<FileMetaData*>& file_metadata) {
+    const std::vector<const FileMetaData*>& file_metadata) {
   static Mutant& i = _GetInst();
   return i._CalcOutputPathId(temperature_triggered_single_sstable_compaction, file_metadata);
 }

@@ -1071,8 +1071,11 @@ Compaction* LevelCompactionPicker::PickCompaction(
   // Mutant does logging inside CalcOutputPathId(). I didn't like the format of this
   // LogToBuffer(log_buffer, "[%s] Mutant AAA\n", cf_name.c_str());
   // 2017/01/08-23:05:48.070539 7fd970f45700 (Original Log Time 2017/01/08-23:05:48.070517) [default] Mutant AAA
-  uint32_t output_path_id = Mutant::CalcOutputPathId(
-      temperature_triggered_single_sstable_compaction, inputs.files);
+  //
+  std::vector<const FileMetaData*> in_fmds;
+  for (const auto i: compaction_inputs)
+    in_fmds.insert(in_fmds.end(), i.files.begin(), i.files.end());
+  uint32_t output_path_id = Mutant::CalcOutputPathId(temperature_triggered_single_sstable_compaction, in_fmds);
 
   if (temperature_triggered_single_sstable_compaction) {
     // No migration needed when the input and output path_ids are the same.
