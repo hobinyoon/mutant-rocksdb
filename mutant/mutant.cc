@@ -1094,8 +1094,8 @@ void Mutant::_SstMigrationTriggererRun() {
       jwriter.EndObject();
       _logger->Log(jwriter);
 
-      if (may_have_sstable_to_migrate)
-        _db->MutantMayScheduleCompaction(_cfd);
+      if (_options.migrate_sstables && may_have_sstable_to_migrate)
+          _db->MutantMayScheduleCompaction(_cfd);
     }
   } catch (const exception& e) {
     TRACE << boost::format("Exception: %s\n") % e.what();
