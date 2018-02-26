@@ -514,10 +514,9 @@ void DBOptions::DumpMutantOptions(Logger* log) const {
   {
     std::vector<std::string> cc_str;
     for (const auto i: mutant_options.cost_changes) {
-      cc_str.push_back(str(boost::format("%d %d") % i[0] % i[1]));
+      cc_str.push_back(str(boost::format("%f %f") % i[0] % i[1]));
     }
-    boost::algorithm::join(cc_str, ", ");
-    Header(log, "  cost_changes: %s", boost::algorithm::join(cc_str, ", "));
+    Header(log, "  cost_changes: %s", boost::algorithm::join(cc_str, ", ").c_str());
   }
 
   Header(log, "  sla_admin_type: %s", mutant_options.sla_admin_type.c_str());
