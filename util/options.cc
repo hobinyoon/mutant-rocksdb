@@ -511,6 +511,15 @@ void DBOptions::DumpMutantOptions(Logger* log) const {
   Header(log, "  simulation_time_dur_sec: %f", mutant_options.simulation_time_dur_sec);
   Header(log, "  simulated_time_dur_sec: %f", mutant_options.simulated_time_dur_sec);
 
+  {
+    std::vector<std::string> cc_str;
+    for (const auto i: mutant_options.cost_changes) {
+      cc_str.push_back(str(boost::format("%d %d") % i[0] % i[1]));
+    }
+    boost::algorithm::join(cc_str, ", ");
+    Header(log, "  cost_changes: %s", boost::algorithm::join(cc_str, ", "));
+  }
+
   Header(log, "  sla_admin_type: %s", mutant_options.sla_admin_type.c_str());
   Header(log, "  sla_observed_value_hist_q_size: %d", mutant_options.sla_observed_value_hist_q_size);
   Header(log, "  error_adj_ranges: %f %f",

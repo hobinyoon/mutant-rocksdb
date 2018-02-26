@@ -12,6 +12,8 @@
 #include <memory>
 #include <string>
 
+#include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/regex.hpp>
 #include <boost/format.hpp>
 #include <boost/iostreams/copy.hpp>
 #include <boost/iostreams/device/back_inserter.hpp>
@@ -4331,6 +4333,26 @@ void Java_org_rocksdb_Options_setMutantOptionsEncoded(
     options->mutant_options.simulated_time_dur_sec = n.get("simulated_time_dur_sec", 0).asDouble();
     options->mutant_options.simulation_time_dur_sec = n.get("simulation_time_dur_sec", 0).asDouble();
   };
+
+  // "cost_changes": "3 0.3, 6 0.25, 9 0.3"
+  //                  pairs of relative time in minutes and target cost
+  std::vector< std::vector<double> > cost_changes;
+  {
+    std::string s0 = json_root.get("cost_changes", "").asString();
+
+    static const auto sep = boost::regex(", ");
+    std::vector<std::string> s1;
+    boost::algorithm::split_regex(s1, s0, sep);
+
+    for (auto s2: s1) {
+      static const auto sep2 = boost::is_any_of(" ");
+      std::vector<std::string> s3;
+      boost::split(s3, s2, boost::is_any_of("\t "));
+      std::vector<double> time_cost = {stod(s3[0]), stod(s3[1])};
+      cost_changes.push_back(time_cost);
+    }
+  }
+  options->mutant_options.cost_changes = cost_changes;
 
   env->ReleaseStringUTFChars(mo, mo1);
 }

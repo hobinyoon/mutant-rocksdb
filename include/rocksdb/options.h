@@ -1382,6 +1382,8 @@ struct DBOptions {
     double simulated_time_dur_sec;
     double simulation_time_dur_sec;
 
+    std::vector< std::vector<double> > cost_changes;
+
     // "none": No SLA admin
     // "latency": latency based
     // "slow_dev_r_iops" slow device iops based
