@@ -1353,7 +1353,7 @@ rocksdbjavastatic: $(java_static_libobjects) make_javalib $(jni_native_objs)
 	$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC \
 		-o ./java/target/$(ROCKSDBJNILIB) $(jni_native_objs) \
 		$(java_static_libobjects) $(COVERAGEFLAGS) \
-		-lz -lbz2 -lsnappy -llz4 -lboost_iostreams -ljsoncpp \
+		-lz -lbz2 -lsnappy -llz4 -lboost_iostreams -lboost_regex -ljsoncpp \
 		$(JAVA_STATIC_LDFLAGS)
 	cd java/target;strip -S -x $(ROCKSDBJNILIB)
 	cd java;jar -cf target/$(ROCKSDB_JAR) HISTORY*.md

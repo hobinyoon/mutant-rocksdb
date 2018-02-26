@@ -4339,17 +4339,20 @@ void Java_org_rocksdb_Options_setMutantOptionsEncoded(
   std::vector< std::vector<double> > cost_changes;
   {
     std::string s0 = json_root.get("cost_changes", "").asString();
+    if (0 < s0.size()) {
+      //TRACE << boost::format("s0=[%s]\n") % s0;
 
-    static const auto sep = boost::regex(", ");
-    std::vector<std::string> s1;
-    boost::algorithm::split_regex(s1, s0, sep);
+      static const auto sep = boost::regex(", ");
+      std::vector<std::string> s1;
+      boost::algorithm::split_regex(s1, s0, sep);
 
-    for (auto s2: s1) {
-      static const auto sep2 = boost::is_any_of(" ");
-      std::vector<std::string> s3;
-      boost::split(s3, s2, boost::is_any_of("\t "));
-      std::vector<double> time_cost = {stod(s3[0]), stod(s3[1])};
-      cost_changes.push_back(time_cost);
+      for (auto s2: s1) {
+        static const auto sep2 = boost::is_any_of(" ");
+        std::vector<std::string> s3;
+        boost::split(s3, s2, sep2);
+        std::vector<double> time_cost = {stod(s3[0]), stod(s3[1])};
+        cost_changes.push_back(time_cost);
+      }
     }
   }
   options->mutant_options.cost_changes = cost_changes;
