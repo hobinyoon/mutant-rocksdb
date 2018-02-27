@@ -298,9 +298,22 @@ void Mutant::_SstOpened(TableReader* tr, const FileDescriptor* fd, int level) {
     return;
   }
 
+  uint64_t sst_id = fd->GetNumber();
+
+  JSONWriter jwriter;
+  EventHelpers::AppendCurrentTime(&jwriter);
+  jwriter << "mutant_sst_opened";
+  jwriter.StartObject();
+  jwriter << "file_number" << sst_id
+          << "file_size" << fd->GetFileSize()
+          << "path_id" << fd->GetPathId()
+          << "level" << level;
+  jwriter.EndObject();
+  jwriter.EndObject();
+  _logger->Log(jwriter);
+
   lock_guard<mutex> lk(_sstMapLock_OpenedClosed);
 
-  uint64_t sst_id = fd->GetNumber();
   SstTemp* st = new SstTemp(tr, fd, level);
 
   //TRACE << boost::format("%d SstOpened sst_id=%d\n") % std::this_thread::get_id() % sst_id;
