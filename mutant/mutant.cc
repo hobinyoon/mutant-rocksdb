@@ -217,6 +217,12 @@ void Mutant::_Init(const DBOptions::MutantOptions* mo, DBImpl* db, EventLogger* 
     }
   }
 
+  // Update target cost in the middle of the run.
+  //   It should be moved to YCSB, when you find some time.
+  if (0 < _options.cost_changes.size()) {
+    _tcu_thread = new thread(bind(&rocksdb::Mutant::_TargetCostUpdaterRun, this));
+  }
+
   _initialized = true;
 }
 
@@ -1152,6 +1158,61 @@ void Mutant::_SetNumRunningFlushes(int n) {
 }
 
 
+void Mutant::_TargetCostUpdaterRun() {
+  try {
+    boost::posix_time::ptime time_begin = boost::posix_time::microsec_clock::local_time();
+
+    for (const auto cc: _options.cost_changes) {
+      if (_tcu_stop_requested)
+        break;
+
+      // Relative time in secs. Input is in mins.
+      double rel_time = cc[0] * 60.0;
+      double target_cost = cc[1];
+
+      boost::posix_time::ptime cur_time = boost::posix_time::microsec_clock::local_time();
+      long cur_time_rel = (cur_time - time_begin).total_seconds();
+
+      double wait_for = rel_time - cur_time_rel;
+      if (wait_for <= 0)
+        continue;
+
+      _TargetCostUpdaterSleep(wait_for);
+      // Hope that the cost is atomically accessed.
+      //   Adding mutex such as _options.stg_cost_slo_lock caused this error:
+      //     https://stackoverflow.com/questions/5966698/error-use-of-deleted-function
+      _options.stg_cost_slo = target_cost;
+
+      JSONWriter jwriter;
+      EventHelpers::AppendCurrentTime(&jwriter);
+      jwriter << "Set target_cost to " << target_cost;
+      jwriter.EndObject();
+      _logger->Log(jwriter);
+    }
+  } catch (const exception& e) {
+    TRACE << boost::format("Exception: %s\n") % e.what();
+    exit(0);
+  }
+}
+
+
+void Mutant::_TargetCostUpdaterSleep(double wait_for_in_secs) {
+  static const auto wait_for_ms = chrono::milliseconds(long(1000.0 * wait_for_in_secs));
+  unique_lock<mutex> lk(_tcu_sleep_mutex);
+  _tcu_sleep_cv.wait_for(lk, wait_for_ms, [&](){return _tcu_wakeupnow;});
+  _tcu_wakeupnow = false;
+}
+
+
+void Mutant::_TargetCostUpdaterWakeup() {
+  {
+    lock_guard<mutex> _(_tcu_sleep_mutex);
+    _tcu_wakeupnow = true;
+  }
+  _tcu_sleep_cv.notify_one();
+}
+
+
 void Mutant::_Shutdown() {
   if (! _initialized)
     return;
@@ -1165,6 +1226,14 @@ void Mutant::_Shutdown() {
     _smt_thread->join();
     delete _smt_thread;
     _smt_thread = nullptr;
+  }
+
+  _tcu_stop_requested = true;
+  _TargetCostUpdaterWakeup();
+  if (_tcu_thread) {
+    _tcu_thread->join();
+    delete _tcu_thread;
+    _tcu_thread = nullptr;
   }
 
   {

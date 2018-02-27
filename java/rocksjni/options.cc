@@ -4350,6 +4350,8 @@ void Java_org_rocksdb_Options_setMutantOptionsEncoded(
         static const auto sep2 = boost::is_any_of(" ");
         std::vector<std::string> s3;
         boost::split(s3, s2, sep2);
+        if (s3.size() != 2)
+          TRACE << boost::format("Unexpected s3.size()=%d\n") % s3.size();
         std::vector<double> time_cost = {stod(s3[0]), stod(s3[1])};
         cost_changes.push_back(time_cost);
       }

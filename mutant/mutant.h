@@ -102,8 +102,14 @@ class Mutant {
   std::mutex _smt_sleep_mutex;
   std::condition_variable _smt_sleep_cv;
   bool _smt_wakeupnow = false;
-
   bool _smt_stop_requested = false;
+
+  // Target cost updater thread
+  std::thread* _tcu_thread = nullptr;;
+  std::mutex _tcu_sleep_mutex;
+  std::condition_variable _tcu_sleep_cv;
+  bool _tcu_wakeupnow = false;
+  bool _tcu_stop_requested = false;
 
   bool _initialized = false;
 
@@ -159,6 +165,10 @@ class Mutant {
   void _SstMigrationTriggererRun();
   void _SstMigrationTriggererSleep();
   void _SstMigrationTriggererWakeup();
+
+  void _TargetCostUpdaterRun();
+  void _TargetCostUpdaterSleep(double wait_for);
+  void _TargetCostUpdaterWakeup();
 
   //void _SlaAdminInit(double target_lat, double p, double i, double d);
   //void _SlaAdminAdjust(double lat);
